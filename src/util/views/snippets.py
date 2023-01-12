@@ -11,10 +11,10 @@ from psycopg2 import sql
 from psycopg2.extensions import quote_ident
 from psycopg2.extras import Json
 
-from .exceptions import MigrationError
-from .helpers import table_of_model
-from .misc import import_script, log_progress
-from .pg import column_exists, column_type, get_max_workers, table_exists
+from ..exceptions import MigrationError
+from ..helpers import table_of_model
+from ..misc import import_script, log_progress
+from ..pg import column_exists, column_type, get_max_workers, table_exists
 
 _logger = logging.getLogger(__name__)
 utf8_parser = html.HTMLParser(encoding="utf-8")

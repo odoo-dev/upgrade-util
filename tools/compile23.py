@@ -12,8 +12,8 @@ py3_only_patterns = [
     # tests are only run from version 12. python2 compatibility is not needed.
     "src/testing.py",
     "src/util/jinja_to_qweb.py",
-    "src/util/snippets.py",
-    "src/util/convert_bootstrap.py",
+    "src/util/views/snippets.py",
+    "src/util/views/bootstrap.py",
     "src/*/tests/*.py",
 ]
 py3_files = []
