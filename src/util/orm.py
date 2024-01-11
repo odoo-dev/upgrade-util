@@ -29,7 +29,7 @@ from .const import BIG_TABLE_THRESHOLD
 from .exceptions import MigrationError
 from .helpers import table_of_model
 from .misc import chunks, log_progress, version_between, version_gte
-from .pg import column_exists, get_columns
+from .pg import column_exists, get_columns, named_cursor
 
 # python3 shims
 try:
@@ -220,8 +220,17 @@ def recompute_fields(cr, model, fields, ids=None, logger=_logger, chunk_size=256
     Model = env(cr)[model] if isinstance(model, basestring) else model
     model = Model._name
     if ids is None:
-        cr.execute('SELECT id FROM "%s"' % table_of_model(cr, model))
-        ids = tuple(map(itemgetter(0), cr.fetchall()))
+        try:
+            cr.execute('SELECT id FROM "%s"' % table_of_model(cr, model))
+            ids = tuple(map(itemgetter(0), cr.fetchall()))
+        except MemoryError:
+            with named_cursor(cr) as ncr:
+                ncr.execute('SELECT id FROM "%s"' % table_of_model(cr, model))
+                chunk = ncr.fetchmany(100000)  # avoid getting millions of ids
+                while chunk:
+                    recompute_fields(cr, model, fields, ids=[i for i, in chunk], strategy=strategy)
+                    chunk = ncr.fetchmany(100000)
+            return
 
     if strategy == "auto":
         big_table = len(ids) > BIG_TABLE_THRESHOLD
