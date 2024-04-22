@@ -72,7 +72,7 @@ def version_between(a, b):
     """
     Return whether currently running Odoo version is in the range `[a,b]`.
 
-    See also :func:`~odoo.upgrade.util.misc.version_gte`
+    See also :func:`version_gte`
 
     .. note::
 

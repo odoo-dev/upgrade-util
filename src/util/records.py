@@ -736,7 +736,7 @@ def force_noupdate(cr, xmlid, noupdate=True, warn=False):
 
     :param str xmlid: record xml_id, under the format `module`.`name`
     :param bool noupdate: value to set on the `noupdate` flag
-    :param warn: whether to output a warning in the logs when the flag was switched from
+    :param bool warn: whether to output a warning in the logs when the flag was switched from
                  `True` to `False`
     """
     if "." not in xmlid:
