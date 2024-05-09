@@ -13,10 +13,11 @@ import json
 import logging
 import re
 import warnings
+from collections import namedtuple
 
 import psycopg2
 from psycopg2 import sql
-from psycopg2.extras import Json
+from psycopg2.extras import Json, execute_values
 
 try:
     from odoo import release
@@ -77,6 +78,148 @@ _CONTEXT_KEYS_TO_CLEAN = (
     "graph_groupbys",
     "orderedBy",
 )
+
+
+ResolvedExportsLine = namedtuple(
+    "ResolvedExportsLine",
+    "export_id export_name export_model line_id path_parts part_index field_name field_model field_id relation_model",
+)
+
+
+def get_resolved_ir_exports(cr, models=None, fields=None, only_missing=False):
+    """
+    Return a list of ir.exports.line records which models or fields match the given arguments.
+
+    Export lines can reference nested models through relationship field "paths"
+    (e.g. "partner_id/country_id/name"), therefore these needs to be resolved properly.
+
+    Only one of ``models`` or ``fields`` arguments should be provided.
+
+    :param list[str] models: a list of model names to match in exports
+    :param list[(str, str)] fields: a list of (model, field) tuples to match in exports
+    :param bool only_missing: include only lines which contain missing models/fields
+    :return: the matched resolved exports lines
+    :rtype: list[ResolvedExportsLine]
+
+    :meta private: exclude from online docs
+    """
+    assert bool(models) ^ bool(fields), "One of models or fields must be given, and not both."
+    extra_where = ""
+    query_params = {}
+    if models:
+        extra_where += " AND field_model = ANY(%(models)s)"
+        query_params["models"] = list(models)
+    if fields:
+        extra_where += " AND (field_model, field_name) IN %(fields)s"
+        query_params["fields"] = tuple((model, field) for model, field in fields)
+    if only_missing:
+        extra_where += " AND field_id IS NULL"
+    # Resolve exports using a recursive CTE query
+    cr.execute(
+        """
+        WITH RECURSIVE resolved_exports_fields AS (
+            -- non-recursive term
+               SELECT e.id                                                      AS export_id,
+                      e.name                                                    AS export_name,
+                      e.resource                                                AS export_model,
+                      el.id                                                     AS line_id,
+                      string_to_array(el.name, '/')                             AS path_parts,
+                      1                                                         AS part_index,
+                      replace((string_to_array(el.name, '/'))[1], '.id', 'id')  AS field_name,
+                      e.resource                                                AS field_model,
+                      elf.id                                                    AS field_id,
+                      elf.relation                                              AS relation_model
+                 FROM ir_exports_line el
+                 JOIN ir_exports e
+                   ON el.export_id = e.id
+            LEFT JOIN ir_model_fields elf
+                   ON elf.model = e.resource AND elf.name = (string_to_array(el.name, '/'))[1]
+            LEFT JOIN ir_model em
+                   ON em.model = e.resource
+
+            UNION ALL
+
+            -- recursive term
+               SELECT ref.export_id,
+                      ref.export_name,
+                      ref.export_model,
+                      ref.line_id,
+                      ref.path_parts,
+                      ref.part_index + 1                                        AS part_index,
+                      replace(ref.path_parts[ref.part_index + 1], '.id', 'id')  AS field_name,
+                      ref.relation_model                                        AS field_model,
+                      refmf.id                                                  AS field_id,
+                      refmf.relation                                            AS relation_model
+                 FROM resolved_exports_fields ref
+            LEFT JOIN ir_model_fields refmf
+                   ON refmf.model = ref.relation_model AND refmf.name = ref.path_parts[ref.part_index + 1]
+                WHERE cardinality(ref.path_parts) > ref.part_index AND ref.relation_model IS NOT NULL
+        )
+          SELECT *
+            FROM resolved_exports_fields
+           WHERE field_name != 'id' {extra_where}
+        ORDER BY export_id, line_id, part_index
+        """.format(extra_where=extra_where),
+        query_params,
+    )
+    return [ResolvedExportsLine(**row) for row in cr.dictfetchall()]
+
+
+def rename_ir_exports_fields(cr, models_fields_map):
+    """
+    Rename fields references in ir.exports.line records.
+
+    :param dict[str, dict[str, str]] models_fields_map: a dict of models to the fields rename dict,
+        like: `{"model.name": {"old_field": "new_field", ...}, ...}`
+
+    :meta private: exclude from online docs
+    """
+    matching_exports = get_resolved_ir_exports(
+        cr,
+        fields=[(model, field) for model, fields_map in models_fields_map.items() for field in fields_map],
+    )
+    if not matching_exports:
+        return
+    _logger.debug("Renaming %d export template lines with renamed fields", len(matching_exports))
+    fixed_lines_paths = {}
+    for row in matching_exports:
+        assert row.field_model in models_fields_map
+        fields_map = models_fields_map[row.field_model]
+        assert row.field_name in fields_map
+        assert row.path_parts[row.part_index - 1] == row.field_name
+        new_field_name = fields_map[row.field_name]
+        fixed_path = list(row.path_parts)
+        fixed_path[row.part_index - 1] = new_field_name
+        fixed_lines_paths[row.line_id] = fixed_path
+    execute_values(
+        cr,
+        """
+        UPDATE ir_exports_line el
+           SET name = v.name
+          FROM (VALUES %s) AS v(id, name)
+         WHERE el.id = v.id
+        """,
+        [(k, "/".join(v)) for k, v in fixed_lines_paths.items()],
+    )
+
+
+def remove_ir_exports_lines(cr, models=None, fields=None):
+    """
+    Delete ir.exports.line records that reference models or fields that are/will be removed.
+
+    Only one of ``models`` or ``fields`` arguments should be provided.
+
+    :param list[str] models: a list of model names to match in exports
+    :param list[(str, str)] fields: a list of (model, field) tuples to match in exports
+
+    :meta private: exclude from online docs
+    """
+    matching_exports = get_resolved_ir_exports(cr, models=models, fields=fields)
+    if not matching_exports:
+        return
+    lines_ids = {row.line_id for row in matching_exports}
+    _logger.debug("Deleting %d export template lines with removed models/fields", len(lines_ids))
+    cr.execute("DELETE FROM ir_exports_line WHERE id IN %s", [tuple(lines_ids)])
 
 
 def ensure_m2o_func_field_data(cr, src_table, column, dst_table):
@@ -201,6 +344,9 @@ def remove_field(cr, model, fieldname, cascade=False, drop_column=True, skip_inh
             """,
             [(fieldname, fieldname + " desc"), model, r"\y{}\y".format(fieldname)],
         )
+
+    # ir.exports
+    remove_ir_exports_lines(cr, fields=[(model, fieldname)])
 
     def adapter(leaf, is_or, negated):
         # replace by TRUE_LEAF, unless negated or in a OR operation but not negated
@@ -1065,22 +1211,9 @@ def _update_field_usage_multi(cr, models, old, new, domain_adapter=None, skip_in
         """
         cr.execute(q.format(col_prefix=col_prefix), p)
 
-        # ir.exports.line
-        q = """
-            UPDATE ir_exports_line l
-               SET name = regexp_replace(l.name, %(old)s, %(new)s, 'g')
-        """
+        # ir.exports
         if only_models:
-            q += """
-              FROM ir_exports e
-             WHERE e.id = l.export_id
-               AND e.resource IN %(models)s
-               AND
-            """
-        else:
-            q += "WHERE "
-        q += "l.name ~ %(old)s"
-        cr.execute(q, p)
+            rename_ir_exports_fields(cr, {model: {old: new} for model in only_models})
 
         # mail.alias
         if column_exists(cr, "mail_alias", "alias_defaults"):

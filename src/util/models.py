@@ -10,7 +10,7 @@ import logging
 import re
 
 from .const import ENVIRON
-from .fields import IMD_FIELD_PATTERN, remove_field
+from .fields import IMD_FIELD_PATTERN, remove_field, remove_ir_exports_lines
 from .helpers import _ir_values_value, _validate_model, model_of_table, table_of_model
 from .indirect_references import indirect_references
 from .inherit import for_each_inherit, inherit_parents
@@ -128,6 +128,9 @@ def remove_model(cr, model, drop_table=True, ignore_m2m=()):
                 query = 'UPDATE "{}" SET {} WHERE id IN %s'.format(ir.table, ",".join(sets))
                 cr.execute(query, args + (tuple(ids),))
                 notify = notify or bool(cr.rowcount)
+
+    # for ir.exports.line we have to take care of "nested" references in fields "paths"
+    remove_ir_exports_lines(cr, models=[model])
 
     _rm_refs(cr, model)
 
