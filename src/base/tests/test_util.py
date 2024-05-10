@@ -18,7 +18,7 @@ from odoo.tools.safe_eval import safe_eval
 
 from odoo.addons.base.maintenance.migrations import util
 from odoo.addons.base.maintenance.migrations.testing import UnitTestCase, parametrize
-from odoo.addons.base.maintenance.migrations.util.domains import _adapt_one_domain
+from odoo.addons.base.maintenance.migrations.util.domains import _adapt_one_domain, _model_of_path
 from odoo.addons.base.maintenance.migrations.util.exceptions import MigrationError
 
 
@@ -26,6 +26,22 @@ class TestAdaptOneDomain(UnitTestCase):
     def setUp(self):
         super(TestAdaptOneDomain, self).setUp()
         self.mock_adapter = mock.Mock()
+
+    @parametrize(
+        [
+            ("res.currency", [], "res.currency"),
+            ("res.currency", ["rate_ids"], "res.currency.rate"),
+            ("res.currency", ("rate_ids", "company_id"), "res.company"),
+            ("res.currency", ["rate_ids", "company_id", "user_ids"], "res.users"),
+            ("res.currency", ("rate_ids", "company_id", "user_ids", "partner_id"), "res.partner"),
+            ("res.users", ["partner_id"], "res.partner"),
+            ("res.users", ["nonexistent_field"], None),
+            ("res.users", ("partner_id", "removed_field"), None),
+        ]
+    )
+    def test_model_of_path(self, model, path, expected):
+        cr = self.env.cr
+        self.assertEqual(_model_of_path(cr, model, path), expected)
 
     def test_change_no_leaf(self):
         # testing plan: updata path of a domain where the last element is not changed
@@ -696,6 +712,30 @@ class TestHelpers(UnitTestCase):
             table = util.table_of_model(cr, model)
             self.assertEqual(table, self.env[model]._table)
             self.assertEqual(util.model_of_table(cr, table), model)
+
+    def test_resolve_model_fields_path(self):
+        from odoo.addons.base.maintenance.migrations.util.helpers import FieldsPathPart, _resolve_model_fields_path
+
+        cr = self.env.cr
+
+        # test with provided paths
+        model, path = "res.currency", ["rate_ids", "company_id", "user_ids", "partner_id"]
+        expected_result = [
+            FieldsPathPart(model, path, 1, "res.currency", "rate_ids", "res.currency.rate"),
+            FieldsPathPart(model, path, 2, "res.currency.rate", "company_id", "res.company"),
+            FieldsPathPart(model, path, 3, "res.company", "user_ids", "res.users"),
+            FieldsPathPart(model, path, 4, "res.users", "partner_id", "res.partner"),
+        ]
+        result = _resolve_model_fields_path(cr, model, path)
+        self.assertEqual(result, expected_result)
+
+        model, path = "res.users", ("partner_id", "removed_field", "user_id")
+        expected_result = [
+            FieldsPathPart(model, list(path), 1, "res.users", "partner_id", "res.partner"),
+            FieldsPathPart(model, list(path), 2, "res.partner", "removed_field", None),
+        ]
+        result = _resolve_model_fields_path(cr, model, path)
+        self.assertEqual(result, expected_result)
 
 
 @unittest.skipIf(

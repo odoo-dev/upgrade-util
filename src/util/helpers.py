@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
+from collections import namedtuple
 
 import lxml
 
@@ -214,3 +215,60 @@ def _get_theme_models():
         "theme.website.menu": "website.menu",
         "theme.ir.attachment": "ir.attachment",
     }
+
+
+FieldsPathPart = namedtuple(
+    "FieldsPathPart",
+    "model path part_index field_model field_name relation_model",
+)
+
+
+def _resolve_model_fields_path(cr, model, path):
+    """
+    Resolve model fields paths (e.g. `hr.appraisal` `['employee_id', 'user_id', 'partner_id']`).
+
+    :param str model: the model to resolve the fields ``path`` from.
+    :param typing.Sequence[str] path: the fields path starting from ``model``.
+    :return: a list of the resolved fields path parts through their relation models.
+    :rtype: list[FieldsPathPart]
+
+    :meta private: exclude from online docs
+    """
+    path = list(path)
+    cr.execute(
+        """
+        WITH RECURSIVE resolved_fields_path AS (
+            -- non-recursive term
+               SELECT p.model                       AS model,
+                      p.path                        AS path,
+                      1                             AS part_index,
+                      p.model                       AS field_model,
+                      p.path[1]                     AS field_name,
+                      imf.relation                  AS relation_model
+                 FROM (VALUES (%(model)s, %(path)s)) p(model, path)
+            LEFT JOIN ir_model_fields imf
+                   ON imf.model = p.model
+                  AND imf.name = p.path[1]
+
+            UNION ALL
+
+            -- recursive term
+               SELECT rfp.model,
+                      rfp.path,
+                      rfp.part_index + 1            AS part_index,
+                      rfp.relation_model            AS field_model,
+                      rfp.path[rfp.part_index + 1]  AS field_name,
+                      rimf.relation                 AS relation_model
+                 FROM resolved_fields_path rfp
+            LEFT JOIN ir_model_fields rimf
+                   ON rimf.model = rfp.relation_model
+                  AND rimf.name = rfp.path[rfp.part_index + 1]
+                WHERE cardinality(rfp.path) > rfp.part_index
+                  AND rfp.relation_model IS NOT NULL
+        )
+        SELECT * FROM resolved_fields_path
+        ORDER BY model, path, part_index
+        """,
+        {"model": model, "path": list(path)},
+    )
+    return [FieldsPathPart(**row) for row in cr.dictfetchall()]
