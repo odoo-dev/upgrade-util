@@ -508,6 +508,7 @@ def remove_inherit_from_model(cr, model, inherit, keep=(), skip_inherit=()):
                             'create_date', 'write_date',
                             '__last_update', 'display_name')
            AND name != ALL(%s)
+           AND state != 'manual'
     """,
         [tuple(inherit_models), list(keep)],
     )
