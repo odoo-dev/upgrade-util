@@ -197,6 +197,8 @@ def remove_ir_exports_lines(cr, models=None, fields=None):
         return
     _logger.debug("Deleting %d export template lines with removed models/fields", len(matching_exports))
     cr.execute("DELETE FROM ir_exports_line WHERE id IN %s", [tuple(matching_exports.keys())])
+    for row in matching_exports:
+        add_to_migration_reports(row, category="Export Templates")
 
 
 def ensure_m2o_func_field_data(cr, src_table, column, dst_table):

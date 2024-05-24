@@ -2,6 +2,7 @@
 import logging
 import os
 import re
+from collections import defaultdict
 from textwrap import dedent
 
 import lxml
@@ -95,6 +96,7 @@ def announce_migration_report(cr):
         "major_version": release.major_version,
         "messages": migration_reports,
         "get_anchor_link_to_record": get_anchor_link_to_record,
+        "group_messages": group_messages,
     }
     _logger.info(migration_reports)
     render = e["ir.qweb"].render if hasattr(e["ir.qweb"], "render") else e["ir.qweb"]._render
@@ -240,3 +242,27 @@ def get_anchor_link_to_record(model, id, name, action_id=None):
     if Markup:
         anchor_tag = Markup(anchor_tag)
     return anchor_tag
+
+
+def group_messages(messages, item=None, attribute=None):
+    """
+    Group messages by a given item index or name or attribute name.
+
+    :param list[(typing.Any, bool)] messages: the list of messages to group.
+    :param typing.Hashable item: the item index to group by.
+        Mutually exclusive with `attribute` argument.
+    :param str attribute: the attribute name to group by.
+        Mutually exclusive with `item` argument.
+    :return: the grouped messages as a dictionary of grouped messages lists.
+    :rtype: dict[typing.Any, list[(typing.Any, bool)]]
+
+    :meta private: exclude from online docs
+    """
+    assert (item is not None) ^ bool(attribute), "Either item or attribute must be specified, and not both"
+    groups = defaultdict(list)
+    for message, raw in messages:
+        if attribute:
+            groups[getattr(message, attribute)].append((message, raw))
+        else:
+            groups[message[item]].append((message, raw))
+    return dict(groups)

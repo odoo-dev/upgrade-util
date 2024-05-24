@@ -43,6 +43,36 @@
           </ul>
         </details></li>
       </t>
+      <t t-elif="category == 'Export Templates'">
+        <li><details>
+          <summary>
+            During the upgrade some fields have been removed.
+            The lines of Export templates referencing those fields have also been automatically removed.
+            Please double-check the affected exports listed below to make sure they work as expected.
+          </summary>
+          <ul>
+            <t t-set="grouped_exports" t-value="group_messages(messages[category], attribute='export_id')"/>
+            <t t-foreach="grouped_exports" t-as="export_id">
+              <t t-if="grouped_exports[export_id]">
+                <t t-set="export_messages" t-value="grouped_exports[export_id]"/>
+                <li>
+                  <strong><t t-raw="get_anchor_link_to_record('ir.exports', export_id, export_messages[0][0].export_name)"/></strong>
+                  (<t t-esc="export_messages[0][0].export_model"/>)
+                  <ul>
+                    <t t-foreach="export_messages" t-as="message">
+                      <li>
+                        <kbd><t t-esc="message[0].fields_path"/></kbd>:
+                        field <kbd><t t-esc="message[0].resolved_path.field_model"/></kbd>
+                        <kbd><t t-esc="message[0].resolved_path.field_name"/></kbd> was removed
+                      </li>
+                    </t>
+                  </ul>
+                </li>
+              </t>
+            </t>
+          </ul>
+        </details></li>
+      </t>
       <t t-else="">
         <t t-foreach="messages[category]" t-as="message">
           <li><t t-if="message[1]" t-raw="message[0]" /><t t-else="" t-esc="message[0]" /></li>
