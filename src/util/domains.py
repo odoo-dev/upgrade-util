@@ -163,12 +163,14 @@ def _model_of_path(cr, model, path):
     if not path:
         return model
     path = tuple(path)
-    resolved_parts = _resolve_model_fields_path(cr, model, path)
-    if not resolved_parts:
+    models_paths = _resolve_model_fields_path(cr, [(model, path)], extra_where="part_index = cardinality(path)")
+    if not models_paths:
         return None
-    last_part = resolved_parts[-1]
-    if last_part.part_index != len(last_part.path):
-        return None
+    assert len(models_paths) == 1
+    resolved_paths = models_paths[(model, path)]
+    assert len(resolved_paths) == 1
+    [last_part] = resolved_paths
+    assert last_part.part_index == len(last_part.path)
     return last_part.relation_model  # could be None
 
 

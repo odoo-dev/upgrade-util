@@ -719,22 +719,36 @@ class TestHelpers(UnitTestCase):
         cr = self.env.cr
 
         # test with provided paths
-        model, path = "res.currency", ["rate_ids", "company_id", "user_ids", "partner_id"]
-        expected_result = [
-            FieldsPathPart(model, path, 1, "res.currency", "rate_ids", "res.currency.rate"),
-            FieldsPathPart(model, path, 2, "res.currency.rate", "company_id", "res.company"),
-            FieldsPathPart(model, path, 3, "res.company", "user_ids", "res.users"),
-            FieldsPathPart(model, path, 4, "res.users", "partner_id", "res.partner"),
+        model1, path1 = "res.currency", ["rate_ids", "company_id", "user_ids", "partner_id"]
+        model2, path2 = "res.users", ("partner_id", "removed_field", "user_id")
+        models_paths = [
+            (model1, path1),
+            (model2, path2),
         ]
-        result = _resolve_model_fields_path(cr, model, path)
+        expected_result = {
+            (model1, tuple(path1)): [
+                FieldsPathPart(model1, path1, 1, "res.currency", "rate_ids", "res.currency.rate"),
+                FieldsPathPart(model1, path1, 2, "res.currency.rate", "company_id", "res.company"),
+                FieldsPathPart(model1, path1, 3, "res.company", "user_ids", "res.users"),
+                FieldsPathPart(model1, path1, 4, "res.users", "partner_id", "res.partner"),
+            ],
+            (model2, tuple(path2)): [
+                FieldsPathPart(model2, list(path2), 1, "res.users", "partner_id", "res.partner"),
+                FieldsPathPart(model2, list(path2), 2, "res.partner", "removed_field", None),
+            ],
+        }
+        result = _resolve_model_fields_path(cr, models_paths)
         self.assertEqual(result, expected_result)
 
-        model, path = "res.users", ("partner_id", "removed_field", "user_id")
-        expected_result = [
-            FieldsPathPart(model, list(path), 1, "res.users", "partner_id", "res.partner"),
-            FieldsPathPart(model, list(path), 2, "res.partner", "removed_field", None),
-        ]
-        result = _resolve_model_fields_path(cr, model, path)
+        # test with extra where clause + params
+        extra_where = "(field_model, field_name) = (%(field_model)s, %(field_name)s)"
+        extra_params = {"field_model": "res.company", "field_name": "user_ids"}
+        expected_result = {
+            (model1, tuple(path1)): [
+                FieldsPathPart(model1, path1, 3, "res.company", "user_ids", "res.users"),
+            ]
+        }
+        result = _resolve_model_fields_path(cr, models_paths, extra_where=extra_where, extra_params=extra_params)
         self.assertEqual(result, expected_result)
 
 

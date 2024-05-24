@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import warnings
+from collections import namedtuple
 
 import psycopg2
 from psycopg2 import sql
@@ -79,7 +80,13 @@ _CONTEXT_KEYS_TO_CLEAN = (
 )
 
 
-def _get_resolved_ir_exports(cr, models=None, fields=None):
+ResolvedExportsLine = namedtuple(
+    "ResolvedExportsLine",
+    "export_id export_name export_model line_id fields_path resolved_path",
+)
+
+
+def get_resolved_ir_exports(cr, models=None, fields=None, only_missing=False):
     """
     Return a list of ir.exports.line records which models or fields match the given arguments.
 
@@ -90,56 +97,55 @@ def _get_resolved_ir_exports(cr, models=None, fields=None):
 
     :param list[str] models: a list of model names to match in exports
     :param list[(str, str)] fields: a list of (model, field) tuples to match in exports
-    :return: the resolved field paths parts for each matched export line id
-    :rtype: dict[int, list[FieldsPathPart]]
+    :param bool only_missing: include only lines which contain missing models/fields
+    :return: the matched resolved exports lines
+    :rtype: list[ResolvedExportsLine]
 
     :meta private: exclude from online docs
     """
     assert bool(models) ^ bool(fields), "One of models or fields must be given, and not both."
-
-    # Get the model fields paths for exports.
-    # When matching fields we can already broadly filter on field names (will be double-checked later).
-    # When matching models we can't exclude anything because we don't know intermediate models.
-    where = ""
-    params = {}
+    extra_where = ""
+    extra_params = {}
+    if models:
+        extra_where += " AND field_model = ANY(%(models)s)"
+        extra_params["models"] = list(models)
     if fields:
-        fields = {(model, fields) for model, fields in fields}  # noqa: C416  # make sure set[tuple]
-        where = "WHERE el.name ~ ANY(%(field_names)s)"
-        params["field_names"] = [f[1] for f in fields]
+        extra_where += " AND (field_model, field_name) IN %(fields)s"
+        extra_params["fields"] = tuple((model, field) for model, field in fields)
+    if only_missing:
+        extra_where += " AND field_id IS NULL"
+
+    input_paths_query = """
+        SELECT e.resource AS model, string_to_array(el.name, '/') AS path
+          FROM ir_exports_line el
+          JOIN ir_exports e ON el.export_id = e.id
+    """
+    resolved_paths = _resolve_model_fields_path(
+        cr,
+        input_paths_query=input_paths_query,
+        extra_where=extra_where,
+        extra_params=extra_params,
+    )
+    if not resolved_paths:
+        return []
     cr.execute(
         """
-        SELECT el.id, e.resource AS model, string_to_array(el.name, '/') AS path
-          FROM ir_exports e
-          JOIN ir_exports_line el ON e.id = el.export_id
-        {where}
-        """.format(where=where),
-        params,
+        SELECT e.id AS export_id,
+               e.name AS export_name,
+               e.resource AS export_model,
+               el.id AS line_id,
+               el.name AS fields_path
+          FROM ir_exports_line el
+          JOIN ir_exports e ON el.export_id = e.id
+         WHERE (e.resource, el.name) IN %s
+        """,
+        [tuple((m, "/".join(p)) for m, p in resolved_paths)],
     )
-    paths_to_line_ids = {}
-    for line_id, model, path in cr.fetchall():
-        paths_to_line_ids.setdefault((model, tuple(path)), set()).add(line_id)
-
-    # Resolve intermediate models for all model fields paths, filter only matching paths parts
-    matching_paths_parts = {}
-    for model, path in paths_to_line_ids:
-        resolved_paths = _resolve_model_fields_path(cr, model, path)
-        if fields:
-            matching_parts = [p for p in resolved_paths if (p.field_model, p.field_name) in fields]
-        else:
-            matching_parts = [p for p in resolved_paths if p.field_model in models]
-        if not matching_parts:
-            continue
-        matching_paths_parts[(model, path)] = matching_parts
-
-    # Return the matched parts for each export line id
-    result = {}
-    for (model, path), matching_parts in matching_paths_parts.items():
-        line_ids = paths_to_line_ids.get((model, path))
-        if not line_ids:
-            continue  # wut?
-        for line_id in line_ids:
-            result.setdefault(line_id, []).extend(matching_parts)
-    return result
+    return [
+        ResolvedExportsLine(resolved_path=resolved_path, **row)
+        for row in cr.dictfetchall()
+        for resolved_path in resolved_paths.get((row["export_model"], tuple(row["fields_path"].split("/"))), ())
+    ]
 
 
 def rename_ir_exports_fields(cr, models_fields_map):
@@ -151,7 +157,7 @@ def rename_ir_exports_fields(cr, models_fields_map):
 
     :meta private: exclude from online docs
     """
-    matching_exports = _get_resolved_ir_exports(
+    matching_exports = get_resolved_ir_exports(
         cr,
         fields=[(model, field) for model, fields_map in models_fields_map.items() for field in fields_map],
     )
@@ -159,16 +165,16 @@ def rename_ir_exports_fields(cr, models_fields_map):
         return
     _logger.debug("Renaming %d export template lines with renamed fields", len(matching_exports))
     fixed_lines_paths = {}
-    for line_id, resolved_paths in matching_exports.items():
-        for path_part in resolved_paths:
-            assert path_part.field_model in models_fields_map
-            fields_map = models_fields_map[path_part.field_model]
-            assert path_part.field_name in fields_map
-            assert path_part.path[path_part.part_index - 1] == path_part.field_name
-            new_field_name = fields_map[path_part.field_name]
-            fixed_path = fixed_lines_paths.get(line_id, list(path_part.path))
-            fixed_path[path_part.part_index - 1] = new_field_name
-            fixed_lines_paths[line_id] = fixed_path
+    for export_line_row in matching_exports:
+        resolved_path = export_line_row.resolved_path
+        assert resolved_path.field_model in models_fields_map
+        fields_map = models_fields_map[resolved_path.field_model]
+        assert resolved_path.field_name in fields_map
+        assert resolved_path.path[resolved_path.part_index - 1] == resolved_path.field_name
+        new_field_name = fields_map[resolved_path.field_name]
+        fixed_path = list(resolved_path.path)
+        fixed_path[resolved_path.part_index - 1] = new_field_name
+        fixed_lines_paths[export_line_row.line_id] = fixed_path
     execute_values(
         cr,
         """
@@ -192,11 +198,12 @@ def remove_ir_exports_lines(cr, models=None, fields=None):
 
     :meta private: exclude from online docs
     """
-    matching_exports = _get_resolved_ir_exports(cr, models=models, fields=fields)
+    matching_exports = get_resolved_ir_exports(cr, models=models, fields=fields)
     if not matching_exports:
         return
-    _logger.debug("Deleting %d export template lines with removed models/fields", len(matching_exports))
-    cr.execute("DELETE FROM ir_exports_line WHERE id IN %s", [tuple(matching_exports.keys())])
+    lines_ids = {row.line_id for row in matching_exports}
+    _logger.debug("Deleting %d export template lines with removed models/fields", len(lines_ids))
+    cr.execute("DELETE FROM ir_exports_line WHERE id IN %s", [tuple(lines_ids)])
 
 
 def ensure_m2o_func_field_data(cr, src_table, column, dst_table):

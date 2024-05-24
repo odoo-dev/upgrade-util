@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 import logging
 import os
-from collections import namedtuple
+import re
+from collections import defaultdict, namedtuple
 
 import lxml
 
@@ -217,24 +218,55 @@ def _get_theme_models():
     }
 
 
-FieldsPathPart = namedtuple(
-    "FieldsPathPart",
+ResolvedFieldsPath = namedtuple(
+    "ResolvedFieldsPath",
     "model path part_index field_model field_name relation_model",
 )
 
 
-def _resolve_model_fields_path(cr, model, path):
+def _resolve_model_fields_path(cr, models_paths=None, input_paths_query=None, extra_where=None, extra_params=None):
     """
     Resolve model fields paths (e.g. `hr.appraisal` `['employee_id', 'user_id', 'partner_id']`).
 
-    :param str model: the model to resolve the fields ``path`` from.
-    :param typing.Sequence[str] path: the fields path starting from ``model``.
-    :return: a list of the resolved fields path parts through their relation models.
-    :rtype: list[FieldsPathPart]
+    Will return all the intermediate results for all fields in the path parts.
+    Callers must do additional filtering of the results to extract the data they need.
+
+    :param list[(str, typing.Sequence[str])] models_paths: a list of (model, path) tuples to resolve.
+        It's mutually exclusive with `input_paths_query`.
+    :param str input_paths_query: the subquery to execute to get the input paths.
+        It must produce a table with at least 2 columns: `model` (text) and `path` (array of text).
+        It's mutually exclusive with `models_paths`.
+    :param sep: the separator used in the paths to split fields names
+    :param extra_where: additional WHERE clauses to add to the query to filter the results
+    :param extra_params: additional parameters to pass to the query for execution
+    :return: a dict of the model fields paths to their resolved fields and models (optionally filtered)
+    :rtype: dict[(str, typing.Sequence[str]), list[ResolvedFieldsPath]]
 
     :meta private: exclude from online docs
     """
-    path = list(path)
+    assert bool(models_paths) ^ bool(input_paths_query), "Only one of models_paths or input_paths_query must be given."
+
+    query_params = {}
+    if models_paths:
+        values_query = ""
+        for i, (model, path) in enumerate(models_paths):
+            params = {"m{}".format(i): model, "p{}".format(i): list(path)}
+            values_query += (", " if values_query else "") + "({})".format(
+                ", ".join("%({})s".format(k) for k in params)
+            )
+            query_params.update(params)
+        input_paths_query = "SELECT * FROM (VALUES %s) p(model, path)" % values_query
+
+    where_clause = ""
+    extra_where = (extra_where or "").strip()
+    if extra_where:
+        where_clause = "WHERE "
+        extra_where = re.sub(r"^(and|or)\s+", "", extra_where, flags=re.I)
+        where_clause += extra_where
+
+    if extra_params:
+        query_params.update(extra_params)
+
     cr.execute(
         """
         WITH RECURSIVE resolved_fields_path AS (
@@ -245,7 +277,7 @@ def _resolve_model_fields_path(cr, model, path):
                       p.model                       AS field_model,
                       p.path[1]                     AS field_name,
                       imf.relation                  AS relation_model
-                 FROM (VALUES (%(model)s, %(path)s)) p(model, path)
+                 FROM paths p
             LEFT JOIN ir_model_fields imf
                    ON imf.model = p.model
                   AND imf.name = p.path[1]
@@ -265,10 +297,15 @@ def _resolve_model_fields_path(cr, model, path):
                   AND rimf.name = rfp.path[rfp.part_index + 1]
                 WHERE cardinality(rfp.path) > rfp.part_index
                   AND rfp.relation_model IS NOT NULL
-        )
+        ),
+        paths AS ({input_paths_query})
         SELECT * FROM resolved_fields_path
+        {where_clause}
         ORDER BY model, path, part_index
-        """,
-        {"model": model, "path": list(path)},
+        """.format(input_paths_query=input_paths_query, where_clause=where_clause),
+        query_params,
     )
-    return [FieldsPathPart(**row) for row in cr.dictfetchall()]
+    result = defaultdict(list)
+    for row in cr.dictfetchall():
+        result[(row["model"], tuple(row["path"]))].append(ResolvedFieldsPath(**row))
+    return dict(result)
