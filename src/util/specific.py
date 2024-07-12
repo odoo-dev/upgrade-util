@@ -25,6 +25,18 @@ def dbuuid(cr):
     return cr.fetchone()[0]
 
 
+@_cached
+def database_uuid(cr):
+    cr.execute(
+        """
+        SELECT value
+          FROM ir_config_parameter
+         WHERE key = 'database.uuid'
+        """
+    )
+    return cr.fetchone()[0]
+
+
 def dispatch_by_dbuuid(cr, version, callbacks):
     """
     Allow to execute a migration script for a specific database only, base on its dbuuid.
