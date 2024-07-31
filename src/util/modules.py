@@ -679,6 +679,34 @@ def trigger_auto_install(cr, module):
 
     cr.execute(query, [module, INSTALLED_MODULE_STATES])
     if cr.rowcount:
+        if table_exists(cr, "module_country"):
+            query = """
+                SELECT mc.country_id
+                  FROM module_country mc
+                  JOIN ir_module_module m ON m.id = mc.module_id
+                 WHERE m.name = %s
+            """
+            cr.execute(query, (module,))
+            country_ids = [country_id for (country_id,) in cr.fetchall()]
+            if country_ids:
+                # Note: res.company "country_id" field is a computed field but
+                #  its inverse will always store the value on partner_id.country_id,
+                #  so for upgrade we consider it as the company country.
+                cr.execute(
+                    """
+                    SELECT c.id
+                      FROM res_company c
+                      JOIN res_partner p ON p.id = c.id
+                     WHERE p.country_id IN %s
+                       AND c.active = true
+                """,
+                    (tuple(country_ids),),
+                )
+                if not cr.rowcount:
+                    # module specific to some countries but no active company of
+                    # those countries have been found
+                    return False
+
         force_install_module(cr, module)
         return True
     return False
@@ -689,7 +717,43 @@ def _set_module_category(cr, module, category):
     cr.execute("UPDATE ir_module_module SET category_id=%s WHERE name=%s", [cid, module])
 
 
-def new_module(cr, module, deps=(), auto_install=False, category=None):
+def _set_module_countries(cr, module, countries):
+    if not table_exists(cr, "module_country"):
+        return
+
+    cr.execute("SELECT id FROM ir_module_module WHERE name = %s", [module])
+    if not cr.rowcount:
+        return
+    mod_id = cr.fetchone()[0]
+
+    if countries:
+        country_codes = tuple(cc.upper() for cc in countries or [])
+        cr.execute("SELECT id FROM res_country WHERE code IN %s", (country_codes,))
+        country_ids = {country_id for (country_id,) in cr.fetchall()}
+    else:
+        country_ids = set()
+    cr.execute(
+        "SELECT country_id FROM module_country WHERE module_id = %s",
+        [mod_id],
+    )
+    current_country_ids = {country_id for (country_id,) in cr.fetchall()}
+    to_remove = current_country_ids - country_ids
+    to_add = country_ids - current_country_ids
+
+    if to_remove:
+        cr.execute(
+            "DELETE FROM module_country WHERE module_id = %s AND country_id IN %s",
+            [mod_id, tuple(to_remove)],
+        )
+
+    for country_id in to_add:
+        cr.execute(
+            "INSERT INTO module_country (module_id, country_id) VALUES (%s, %s)",
+            [mod_id, country_id],
+        )
+
+
+def new_module(cr, module, deps=(), auto_install=False, category=None, countries=None):
     if deps:
         _assert_modules_exists(cr, *deps)
 
@@ -726,6 +790,9 @@ def new_module(cr, module, deps=(), auto_install=False, category=None):
             """,
             [module, new_id],
         )
+
+    if countries is not None:
+        _set_module_countries(cr, module, countries)
 
     for dep in deps:
         new_module_dep(cr, module, dep)
@@ -822,12 +889,17 @@ def _trigger_auto_discovery(cr):
     graph = {}
     for module in odoo.modules.get_modules():
         manifest = get_manifest(module)
-        graph[module] = (set(manifest["depends"]), manifest["auto_install"], manifest["category"])
+        graph[module] = (
+            set(manifest["depends"]),
+            manifest["auto_install"],
+            manifest["category"],
+            manifest.get("countries"),
+        )
 
     for module in topological_sort({k: v[0] for k, v in graph.items()}):
-        deps, auto_install, category = graph[module]
+        deps, auto_install, category, countries = graph[module]
         if module not in existing:
-            new_module(cr, module, deps=deps, auto_install=auto_install, category=category)
+            new_module(cr, module, deps=deps, auto_install=auto_install, category=category, countries=countries)
         else:
             current_deps = set(existing[module])
             plus = deps - current_deps
@@ -835,6 +907,7 @@ def _trigger_auto_discovery(cr):
             if plus or minus:
                 module_deps_diff(cr, module, plus=plus, minus=minus)
             _set_module_category(cr, module, category)
+            _set_module_countries(cr, module, countries)
             module_auto_install(cr, module, auto_install)
 
         if module in force_installs:
