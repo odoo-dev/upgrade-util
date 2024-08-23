@@ -75,6 +75,8 @@ def remove_model(cr, model, drop_table=True, ignore_m2m=()):
     notify = False
     unk_id = _unknown_model_id(cr)
 
+    ENVIRON["__renamed_models"][model] = None
+
     # remove references
     for ir in indirect_references(cr):
         if ir.table in ("ir_model", "ir_model_fields", "ir_model_data"):
@@ -215,7 +217,7 @@ def remove_model(cr, model, drop_table=True, ignore_m2m=()):
             category="Removed Models",
         )
 
-    spreadsheet.remove_model_in_all_spreadsheets(cr, model)
+    # spreadsheet.remove_model_in_all_spreadsheets(cr, model)
 
 
 # compat layer...
@@ -234,6 +236,10 @@ def rename_model(cr, old, new, rename_table=True):
     _validate_model(new)
     if old in ENVIRON["__renamed_fields"]:
         ENVIRON["__renamed_fields"][new] = ENVIRON["__renamed_fields"].pop(old)
+
+    if old in ENVIRON["__renamed_models"]:
+        ENVIRON["__renamed_models"][new] = ENVIRON["__renamed_models"].pop(old)
+
     if rename_table:
         old_table = table_of_model(cr, old)
         new_table = table_of_model(cr, new)
@@ -347,7 +353,7 @@ def rename_model(cr, old, new, rename_table=True):
     """.format(col_prefix=col_prefix, old=old.replace(".", r"\."), new=new)
     )
 
-    spreadsheet.rename_model_in_all_spreadsheets(cr, model, new)
+    # spreadsheet.rename_model_in_all_spreadsheets(cr, model, new)
 
 
 def merge_model(cr, source, target, drop_table=True, fields_mapping=None, ignore_m2m=()):
@@ -377,6 +383,10 @@ def merge_model(cr, source, target, drop_table=True, fields_mapping=None, ignore
     mapping = {model_ids[source]: model_ids[target]}
     ignores = ["ir_model", "ir_model_fields", "ir_model_constraint", "ir_model_relation"]
     replace_record_references_batch(cr, mapping, "ir.model", replace_xmlid=False, ignores=ignores)
+
+    ## pas certain mais aloer pas du tout
+    ENVIRON["__renamed_models"][target] = ENVIRON["__renamed_models"].pop(source)
+    ENVIRON["__renamed_models"][source] = None
 
     # remap the fields on ir_model_fields
     cr.execute(

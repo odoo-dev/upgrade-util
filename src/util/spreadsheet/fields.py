@@ -1,26 +1,22 @@
-import re
 import json
-
-from typing import Iterable
-
+import re
 from itertools import chain
-
-
-from .data_wrappers import Spreadsheet, create_data_source_from_cmd
-from .misc import (
-    apply_in_all_spreadsheets,
-    adapt_view_link_cells,
-    remove_data_source_function,
-    remove_lists,
-    remove_pivots,
-    remove_odoo_charts,
-    transform_data_source_functions,
-)
-
-from .revisions import CommandAdapter, transform_revisions_data
+from typing import Iterable
 
 from odoo.osv import expression
 
+from .data_wrappers import Spreadsheet, create_data_source_from_cmd
+from .misc import (
+    adapt_view_link_cells,
+    apply_in_all_spreadsheets,
+    remove_data_source_function,
+    remove_lists,
+    remove_odoo_charts,
+    remove_pivots,
+    transform_data_source_functions,
+)
+from .revisions import CommandAdapter, transform_revisions_data
+from odoo.addons.base.maintenance.migrations import util
 from odoo.upgrade.util.context import adapt_context, clean_context
 from odoo.upgrade.util.domains import _adapt_one_domain
 
@@ -49,6 +45,25 @@ def rename_field(cr, model, old, new, data, revisions=()):
     # adapters += _rename_field_in_filters(cr, spreadsheet, model, old, new)
     # adapters += _rename_field_in_view_link(cr, spreadsheet, model, old, new)
     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
+
+def rename_fields(cr):
+    for model, fields in util.ENVIRON["__renamed_fields"].items():
+        for old_value, new_value in fields.items():
+            if new_value:
+                apply_in_all_spreadsheets(
+                    cr,
+                    old_value,
+                    (lambda data, revisions_data: rename_field(cr, model, old_value, new_value, data, revisions_data)),
+                )
+            else:
+                apply_in_all_spreadsheets(
+                    cr,
+                    old_value,
+                    (lambda data, revisions_data: remove_field(cr, model, old_value, data, revisions_data)),
+                )
+
+
+
 
 
 def remove_field_in_all_spreadsheets(cr, model, field):

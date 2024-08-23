@@ -322,7 +322,7 @@ def remove_field(cr, model, fieldname, cascade=False, drop_column=True, skip_inh
     for inh in for_each_inherit(cr, model, skip_inherit):
         remove_field(cr, inh.model, fieldname, cascade=cascade, drop_column=drop_column, skip_inherit=skip_inherit)
 
-    spreadsheet.remove_field_in_all_spreadsheets(cr, model, fieldname)
+    # spreadsheet.remove_field_in_all_spreadsheets(cr, model, fieldname)
 
 
 def remove_field_metadata(cr, model, fieldname, skip_inherit=()):

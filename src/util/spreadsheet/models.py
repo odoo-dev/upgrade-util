@@ -3,6 +3,8 @@ from .data_wrappers import Spreadsheet, create_data_source_from_cmd
 from .misc import apply_in_all_spreadsheets, adapt_view_link_cells, remove_lists, remove_pivots, remove_odoo_charts
 from .revisions import CommandAdapter, Drop, transform_revisions_data, transform_commands
 
+from odoo.addons.base.maintenance.migrations import util
+
 
 def rename_model_in_all_spreadsheets(cr, old_value, new_value):
     apply_in_all_spreadsheets(cr, old_value, (lambda data, revisions_data: rename_model(old_value, new_value, data, revisions_data)))
@@ -19,6 +21,22 @@ def rename_model(old, new, data, revisions = ()):
 
 def remove_model_in_all_spreadsheets(cr, model):
     apply_in_all_spreadsheets(cr, model, (lambda data, revisions_data: remove_model(model, data, revisions_data)))
+
+def remove_models(cr):
+    for model, new_model in util.ENVIRON["__renamed_models"].items():
+        if not new_model:
+            apply_in_all_spreadsheets(
+                    cr,
+                    model,
+                    (lambda data, revisions_data: remove_model(cr, model, data, revisions_data)),
+                )
+        else:
+            apply_in_all_spreadsheets(
+                    cr,
+                    model,
+                    (lambda data, revisions_data: rename_model(cr, model, new_model, data, revisions_data)),
+                )
+
 
 def remove_model(model: str, data, revisions = ()) -> str:
     spreadsheet = Spreadsheet(data)

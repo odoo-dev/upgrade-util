@@ -88,7 +88,7 @@ def apply_in_all_spreadsheets(cr, like_pattern, callback):
     # print("like pattern :   ", like_pattern)
     b = False
     # upgrade the initial data and all revisions based on it
-    for attachment_id, res_model, res_id, db_datas in read_spreadsheet_initial_data(cr, like_pattern):
+    for attachment_id, _, _, db_datas in read_spreadsheet_initial_data(cr, like_pattern):
         print("attachment data id:   ", attachment_id)
         print("datas:   ", len(db_datas))
         b = True
@@ -116,8 +116,8 @@ def apply_in_all_spreadsheets(cr, like_pattern, callback):
                 """,
                 [json.dumps(revision), rev_id],
             )
-    if b:
-        _logger.info("upgrading initial data and revisions")
+    # if b:
+    #     _logger.info("upgrading initial data and revisions")
 
     b = False
     # upgrade snapshots
@@ -128,8 +128,8 @@ def apply_in_all_spreadsheets(cr, like_pattern, callback):
         data, revisions = callback(db_datas, [])
         write_attachment(cr, attachment_id, data)
 
-    if b:
-        _logger.info("upgrading snapshots")
+    # if b:
+    #     _logger.info("upgrading snapshots")
 
 
 
