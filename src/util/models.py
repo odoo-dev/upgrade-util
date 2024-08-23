@@ -385,7 +385,8 @@ def merge_model(cr, source, target, drop_table=True, fields_mapping=None, ignore
     replace_record_references_batch(cr, mapping, "ir.model", replace_xmlid=False, ignores=ignores)
 
     ## pas certain mais aloer pas du tout
-    ENVIRON["__renamed_models"][target] = ENVIRON["__renamed_models"].pop(source)
+    if source in ENVIRON["__renamed_models"]:
+        ENVIRON["__renamed_models"][target] = ENVIRON["__renamed_models"].pop(source)
     ENVIRON["__renamed_models"][source] = None
 
     # remap the fields on ir_model_fields
