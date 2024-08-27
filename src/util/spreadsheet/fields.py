@@ -40,10 +40,10 @@ def rename_field_in_all_spreadsheets(cr, model, old_value, new_value):
 def rename_field(cr, model, old, new, data, revisions=()):
     spreadsheet = Spreadsheet(data)
     adapters = _rename_field_in_list(cr, spreadsheet, model, old, new)
-    # adapters += _rename_field_in_pivot(cr, spreadsheet, model, old, new)
-    # adapters += _rename_field_in_chart(cr, spreadsheet, model, old, new)
-    # adapters += _rename_field_in_filters(cr, spreadsheet, model, old, new)
-    # adapters += _rename_field_in_view_link(cr, spreadsheet, model, old, new)
+    adapters += _rename_field_in_pivot(cr, spreadsheet, model, old, new)
+    adapters += _rename_field_in_chart(cr, spreadsheet, model, old, new)
+    adapters += _rename_field_in_filters(cr, spreadsheet, model, old, new)
+    adapters += _rename_field_in_view_link(cr, spreadsheet, model, old, new)
     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
 def rename_fields(cr):
@@ -334,7 +334,7 @@ def _rename_field_in_view_link(cr, spreadsheet: Spreadsheet, model, old, new):
 
 
 def _remove_list_functions(content, list_ids, field):
-    """Remove functions such as ODOO.LIST(1, 'field') or ODOO.LIST.HEADER(1, 'field')"""
+    """Remove functions such as ODOO.LIST(1, 'field') or ODOO.LIST.HEADER(1, 'field')."""
 
     def filter_func(func_call_ast):
         return any(arg.value == field for arg in func_call_ast.args[1:])
@@ -442,10 +442,10 @@ def _is_field_in_chain(cr, field_model, field, data_source_model, field_chain):
 
 
 def domain_fields(domain):
-    """return all field names used in the domain
+    """Return all field names used in the domain
     >>> domain_fields([['field1', '=', 1], ['field2', '=', 2]])
-    ['field1', 'field2']
-    """
+    ['field1', 'field2'].
+    """  # noqa: D205
     return [leaf[0] for leaf in domain if len(leaf) == 3]
 
 
@@ -454,7 +454,7 @@ def pivot_measure_fields(pivot):
 
 
 def pivot_fields(pivot):
-    """return all field names used in a pivot definition"""
+    """Return all field names used in a pivot definition."""
     fields = set(pivot.col_group_by + pivot.row_group_by + pivot_measure_fields(pivot) + domain_fields(pivot.domain))
     measure = pivot.order_by and pivot.order_by["field"]
     if measure and measure != "__count":
@@ -463,7 +463,7 @@ def pivot_fields(pivot):
 
 
 def chart_fields(chart):
-    """return all field names used in a chart definitions"""
+    """Return all field names used in a chart definitions."""
     fields = set(chart.group_by + domain_fields(chart.domain))
     measure = chart.measure
     if measure != "__count":

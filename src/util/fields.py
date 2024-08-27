@@ -538,7 +538,7 @@ def rename_field(cr, model, old, new, update_references=True, domain_adapter=Non
     for inh in for_each_inherit(cr, model, skip_inherit):
         rename_field(cr, inh.model, old, new, update_references=update_references, skip_inherit=skip_inherit)
 
-    spreadsheet.rename_field_in_all_spreadsheets(cr, model, old, new)
+    # spreadsheet.rename_field_in_all_spreadsheets(cr, model, old, new)
 
 
 def invert_boolean_field(cr, model, old, new, skip_inherit=()):
