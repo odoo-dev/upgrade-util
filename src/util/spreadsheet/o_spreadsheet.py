@@ -44,18 +44,6 @@ def _create_empty_workbook(sheet_name: str = "Sheet1") -> dict:
     }
 
 
-# def upgrade_data(data, upgrade_functions, to_version, version_field="version"):
-#     data = load(data)
-#     upgrade_functions.sort(key=lambda x: x[0])
-#     for upgrade_version, upgrade in upgrade_functions:
-#         if data.get(version_field, 0) < upgrade_version:
-#             upgrade(data)
-#             data[version_field] = upgrade_version
-#         if upgrade_version == to_version:
-#             return data
-#     return data
-
-
 # Reference of a column header (eg. A, AB)
 col_header = re.compile(r"^([A-Z]{1,3})+$")
 cell_reference = r"\$?([A-Z]{1,3})\$?([0-9]{1,7})"

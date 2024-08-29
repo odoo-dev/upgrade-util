@@ -37,6 +37,26 @@ def remove_models(cr):
                     (lambda data, revisions_data: rename_model(cr, model, new_model, data, revisions_data)),
                 )
 
+def modify_all_models(cr, data, revisions=()):
+    spreadsheet = Spreadsheet(data)
+    adapters = ()
+    for old_model, new_model in util.ENVIRON["__renamed_models"].items():
+        if new_model:
+            adapters += _rename_model_in_list(spreadsheet, old_model, new_model)
+            adapters += _rename_model_in_pivot(spreadsheet, old_model, new_model)
+            adapters += _rename_model_in_filters(spreadsheet, old_model, new_model)
+            adapters += _rename_model_in_charts(spreadsheet, old_model, new_model)
+            adapters += _rename_model_in_view_link(spreadsheet, old_model, new_model)
+        else:
+            adapters += _remove_model_from_lists(old_model, spreadsheet)
+            adapters += _remove_model_from_pivots(old_model, spreadsheet)
+            adapters += _remove_model_from_charts(old_model, spreadsheet)
+            adapters += _remove_model_from_filters(old_model, spreadsheet)
+            adapters += _remove_model_from_view_link(old_model, spreadsheet)
+            spreadsheet.clean_empty_cells()
+    return spreadsheet.data, transform_revisions_data(revisions, *adapters)
+
+
 
 def remove_model(model: str, data, revisions = ()) -> str:
     spreadsheet = Spreadsheet(data)

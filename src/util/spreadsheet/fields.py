@@ -46,6 +46,27 @@ def rename_field(cr, model, old, new, data, revisions=()):
     adapters += _rename_field_in_view_link(cr, spreadsheet, model, old, new)
     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
+def modify_all_fields(cr, data, revisions=()):
+    spreadsheet = Spreadsheet(data)
+    adapters = ()
+    for model, fields in util.ENVIRON["__renamed_fields"].items():
+        for old_value, new_value in fields.items():
+            if new_value:
+                adapters += _rename_field_in_list(cr, spreadsheet, model, old_value, new_value)
+                adapters += _rename_field_in_pivot(cr, spreadsheet, model, old_value, new_value)
+                adapters += _rename_field_in_chart(cr, spreadsheet, model, old_value, new_value)
+                adapters += _rename_field_in_filters(cr, spreadsheet, model, old_value, new_value)
+                adapters += _rename_field_in_view_link(cr, spreadsheet, model, old_value, new_value)
+            else:
+                _remove_field_from_filter_matching(cr, spreadsheet, model, old_value)
+                adapters += _remove_field_from_list(cr, spreadsheet, model, old_value)
+                adapters += _remove_field_from_pivot(cr, spreadsheet, model, old_value)
+                adapters += _remove_field_from_graph(cr, spreadsheet, model, old_value)
+                adapters += _remove_field_from_view_link(cr, spreadsheet, model, old_value)
+                spreadsheet.clean_empty_cells()
+
+    return spreadsheet.data, transform_revisions_data(revisions, *adapters)
+
 def rename_fields(cr):
     for model, fields in util.ENVIRON["__renamed_fields"].items():
         for old_value, new_value in fields.items():
@@ -73,6 +94,7 @@ def remove_field_in_all_spreadsheets(cr, model, field):
 
 
 def remove_field(cr, model, field, data, revisions=()):
+
     spreadsheet = Spreadsheet(data)
     _remove_field_from_filter_matching(cr, spreadsheet, model, field)
     adapters = _remove_field_from_list(cr, spreadsheet, model, field)
@@ -416,7 +438,7 @@ def _remove_field_from_view_link(cr, spreadsheet: Spreadsheet, model, field):
             clean_context(action["context"], field)
             action["domain"] = _adapt_one_domain(
                 cr, model, field, "ignored", model, action["domain"], remove_adapter, force_adapt=True
-            )
+            ) or action["domain"]
 
     return adapt_view_link_cells(spreadsheet, adapt_view_link)
 

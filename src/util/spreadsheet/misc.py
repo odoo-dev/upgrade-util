@@ -1,4 +1,3 @@
-
 import re
 import json
 import logging
@@ -58,7 +57,7 @@ def read_spreadsheet_initial_data(cr, like_pattern=""):
                 yield attachment_id, "documents.document", document_id, json.loads(db_datas.tobytes())
 
     if util.table_exists(cr, "spreadsheet_dashboard"):
-        data_field = _magic_spreadsheet_field(cr) #"spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
+        data_field = _magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
         cr.execute(
             """
             SELECT id, res_model, res_id, db_datas
@@ -73,19 +72,21 @@ def read_spreadsheet_initial_data(cr, like_pattern=""):
             if db_datas:
                 yield attachment_id, res_model, res_id, json.loads(db_datas.tobytes())
 
+
+# TODORAR good joke but still, let's find some better name at least
 def _magic_spreadsheet_field(cr):
     cr.execute(
-    """
+        """
     SELECT count(1)
         FROM ir_model_fields
         WHERE model='spreadsheet.mixin'
         AND name='spreadsheet_binary_data';
     """
     )
-    return cr.fetchone()[0] and 'spreadsheet_binary_data' or 'data'
+    return cr.fetchone()[0] and "spreadsheet_binary_data" or "data"
+
 
 def apply_in_all_spreadsheets(cr, like_pattern, callback):
-    # print("like pattern :   ", like_pattern)
     b = False
     # upgrade the initial data and all revisions based on it
     for attachment_id, _, _, db_datas in read_spreadsheet_initial_data(cr, like_pattern):
@@ -124,13 +125,12 @@ def apply_in_all_spreadsheets(cr, like_pattern, callback):
     for attachment_id, _res_model, _res_id, db_datas in read_spreadsheet_snapshots(cr, like_pattern):
         print("attachment snapshot id:   ", attachment_id)
 
-        b=True
-        data, revisions = callback(db_datas, [])
+        b = True
+        data, _ = callback(db_datas, [])
         write_attachment(cr, attachment_id, data)
 
     # if b:
     #     _logger.info("upgrading snapshots")
-
 
 
 def write_attachment(cr, attachment_id, data):
@@ -141,7 +141,7 @@ def write_attachment(cr, attachment_id, data):
            SET db_datas=%s
          WHERE id=%s
         """,
-        [json.dumps(data).encode(), attachment_id]
+        [json.dumps(data).encode(), attachment_id],
     )
 
 
@@ -153,9 +153,10 @@ def get_revisions(cr, res_model, res_id, like_pattern):
               FROM spreadsheet_revision
              WHERE commands LIKE %s
             """,
-            ['%' + like_pattern + '%'],
+            ["%" + like_pattern + "%"],
         )
     else:
+        # ??????
         cr.execute(
             """
             SELECT id, commands
@@ -165,6 +166,7 @@ def get_revisions(cr, res_model, res_id, like_pattern):
             [like_pattern],
         )
     return cr.fetchall()
+
 
 def upgrade_data(cr, upgrade_callback):
     for attachment_id, _res_model, _res_id, data in read_spreadsheet_attachments(cr):
@@ -195,6 +197,7 @@ def transform_data_source_functions(content, data_source_ids, functions, adapter
         return content
 
     data_source_ids = [str(did) for did in data_source_ids]
+
     def _adapter(fun_call):
         # call the provided adapter only if the function name
         # and data source matches
@@ -208,13 +211,16 @@ def transform_data_source_functions(content, data_source_ids, functions, adapter
     return f"={ast_to_string(ast)}"
 
 
-
 def adapt_view_link_cells(spreadsheet: Spreadsheet, adapter: Callable[[str], Union[str, None]]):
     def adapt_view_link(content):
         """A view link is formatted as a markdown link
-        [text](odoo://view/<stringified view description dict>)
-        """
+        [text](odoo://view/<stringified view description dict>).
+        """  # noqa: D205, D401
+        if not content:
+            return content
+
         match = re.match(r"^\[([^\[]+)\]\(odoo://view/(.+)\)$", content)
+
         if not match:
             return content
         label = match.group(1)
@@ -224,10 +230,14 @@ def adapt_view_link_cells(spreadsheet: Spreadsheet, adapter: Callable[[str], Uni
             return ""
         return f"[{label}](odoo://view/{json.dumps(view_description)})"
 
+    def adapt_view_link_command(cmd):
+        if not cmd.get("content", None):
+            return cmd
+        return dict(cmd, content=adapt_view_link(cmd.get("content")))
+
     for cell in spreadsheet.cells:
         cell["content"] = adapt_view_link(cell["content"])
-    return (CommandAdapter("UPDATE_CELL", lambda cmd: dict(cmd, content=adapt_view_link(cmd.get("content")))),)
-
+    return (CommandAdapter("UPDATE_CELL", lambda cmd: adapt_view_link_command(cmd)),)
 
 
 def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_predicate: Callable[[Dict], bool]):
@@ -279,7 +289,6 @@ def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_pre
     )
 
 
-
 def remove_lists(spreadsheet: Spreadsheet, list_ids: List[str], insert_cmd_predicate: Callable[[Dict], bool]):
     spreadsheet.delete_lists(*list_ids)
     for cell in spreadsheet.cells:
@@ -329,6 +338,7 @@ def remove_lists(spreadsheet: Spreadsheet, list_ids: List[str], insert_cmd_predi
         CommandAdapter("UPDATE_CELL", adapt_update_cell),
     )
 
+
 def remove_odoo_charts(spreadsheet: Spreadsheet, chart_ids: List[str], insert_cmd_predicate: Callable[[Dict], bool]):
     spreadsheet.delete_figures(*chart_ids)
 
@@ -339,7 +349,6 @@ def remove_odoo_charts(spreadsheet: Spreadsheet, chart_ids: List[str], insert_cm
             return Drop
 
     def adapt_chart_cmd_with_id(cmd):
-
         if cmd["id"] in chart_ids:
             return Drop
 
@@ -347,6 +356,7 @@ def remove_odoo_charts(spreadsheet: Spreadsheet, chart_ids: List[str], insert_cm
         if cmd.get("chart"):
             for chart_id in chart_ids:
                 cmd["chart"].pop(chart_id, None)
+
     return (
         CommandAdapter("CREATE_CHART", adapt_create_chart),
         CommandAdapter("UPDATE_CHART", adapt_chart_cmd_with_id),
