@@ -46,7 +46,6 @@ def update_spreadsheets_table_changes(cr):
                     _logger.info("--- %s seconds to update  & write ---" % (time.time() - start_time))
         _logger.info("--- %s seconds to update spreadsheets ---" % (time.time() - start_total_time))
 
-
     start_time = time.time()
     if util.table_exists(cr, "spreadsheet_dashboard"):
         data_field = _magic_spreadsheet_field(cr) #"spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
@@ -68,6 +67,29 @@ def update_spreadsheets_table_changes(cr):
                     data, _ = modify_all_models(cr, data)
                     write_attachment(cr, attachment_id, data)
     _logger.info("--- %s seconds to update dashboards ---" % (time.time() - start_time))
+
+    # les putains de snapshots ..; eh ouiiii faut aussi supporter ça .. donc ca fait encore une saloperie a migrer en plus, TROP BIEN
+    query = r"""
+         SELECT res_id, id, db_datas
+           FROM ir_attachment
+          WHERE res_field = 'spreadsheet_snapshot'
+        """
+
+    # for unused_doc_id, attachment_id, db_datas in cr.fetchall():
+    start_total_time = time.time()
+    with util.named_cursor(cr, 20) as ncr:
+        ncr.execute(query)
+
+        for unused_doc_id, attachment_id, db_datas in ncr:
+            if db_datas:
+                start_time = time.time()
+                data = json.loads(db_datas.tobytes())
+                data, _ = modify_all_fields(cr, data)
+                data, _ = modify_all_models(cr, data)
+                _logger.info("--- %s seconds to update ---" % (time.time() - start_time))
+                write_attachment(cr, attachment_id, data)
+                _logger.info("--- %s seconds to update  & write ---" % (time.time() - start_time))
+    _logger.info("--- %s seconds to update snapshots ---" % (time.time() - start_total_time))
 
 
     start_time = time.time()
