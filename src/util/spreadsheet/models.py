@@ -54,6 +54,12 @@ def modify_all_models(cr, data, revisions=()):
             adapters += _remove_model_from_filters(old_model, spreadsheet)
             adapters += _remove_model_from_view_link(old_model, spreadsheet)
             spreadsheet.clean_empty_cells()
+
+    # print("waaaaaa2")
+    # print("waaaaaa2")
+    # print("waaaaaa2")
+    # print("waaaaaa2")
+    # print(len(adapters))
     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
 

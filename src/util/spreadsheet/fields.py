@@ -49,8 +49,10 @@ def rename_field(cr, model, old, new, data, revisions=()):
 def modify_all_fields(cr, data, revisions=()):
     spreadsheet = Spreadsheet(data)
     adapters = ()
+    c = 0
     for model, fields in util.ENVIRON["__renamed_fields"].items():
         for old_value, new_value in fields.items():
+            c+=1
             if new_value:
                 adapters += _rename_field_in_list(cr, spreadsheet, model, old_value, new_value)
                 adapters += _rename_field_in_pivot(cr, spreadsheet, model, old_value, new_value)
@@ -65,6 +67,13 @@ def modify_all_fields(cr, data, revisions=()):
                 adapters += _remove_field_from_view_link(cr, spreadsheet, model, old_value)
                 spreadsheet.clean_empty_cells()
 
+
+    print("waaaaaa")
+    print("waaaaaa")
+    print("waaaaaa")
+    print("waaaaaa")
+    print("number of renames: %s" % c)
+    print(len(adapters))
     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
 def rename_fields(cr):
