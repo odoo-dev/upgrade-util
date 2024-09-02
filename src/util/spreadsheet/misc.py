@@ -272,10 +272,14 @@ def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_pre
         return cmd
 
     def adapt_update_cell(cmd):
-        content = remove_data_source_function(cmd.get("content"), pivot_ids, ["ODOO.PIVOT", "ODOO.PIVOT.HEADER"])
-        if not content:
-            return Drop
-        cmd["content"] = content
+        old_content = cmd.get("content", "")
+        if old_content:
+            content = remove_data_source_function(old_content, pivot_ids, ["ODOO.PIVOT", "ODOO.PIVOT.HEADER"])
+            if not content:
+                return Drop
+            cmd["content"] = content
+        else:
+            return cmd # not sure
 
     return (
         CommandAdapter("INSERT_PIVOT", adapt_insert),
@@ -347,10 +351,13 @@ def remove_odoo_charts(spreadsheet: Spreadsheet, chart_ids: List[str], insert_cm
         if cmd["definition"]["type"].startswith("odoo_") and insert_cmd_predicate(chart):
             chart_ids.append(cmd["id"])
             return Drop
+        return cmd # not sure
 
     def adapt_chart_cmd_with_id(cmd):
         if cmd["id"] in chart_ids:
             return Drop
+        return cmd # not sure
+
 
     def adapt_global_filters(cmd):
         if cmd.get("chart"):

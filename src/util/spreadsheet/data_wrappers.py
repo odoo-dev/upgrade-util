@@ -65,11 +65,11 @@ class Spreadsheet:
                     yield OdooChartV16(dict(figure["data"], id=figure["id"]))
 
     @property
-    def pivots(self) -> List[str]:
+    def pivots(self) -> List[str]: # TODORAR typage foireux
         return [self.pivotContructor(d) for d in self.data.get("pivots", {}).values()]
 
     @property
-    def lists(self) -> List[str]:
+    def lists(self) -> List[str]: # TODORAR typage foireux
         return [SpreadsheetList(d) for d in self.data.get("lists", {}).values()]
 
     @property
