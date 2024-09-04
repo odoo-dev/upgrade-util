@@ -37,7 +37,7 @@ from odoo.addons.base.maintenance.migrations import util
 #                 )
 
 
-def modify_all_models(cr, data, revisions=()):
+def modify_all_models(cr, data):
     spreadsheet = Spreadsheet(data)
     adapters = ()
 
@@ -58,7 +58,7 @@ def modify_all_models(cr, data, revisions=()):
     adapters += _rename_model_in_view_link(spreadsheet, to_change)
     spreadsheet.clean_empty_cells()  ## TODO do only once ...
 
-    return spreadsheet.data, transform_revisions_data(revisions, *adapters)
+    return spreadsheet.data, adapters  # transform_revisions_data(revisions, *adapters)
 
 
 # def remove_model(model: str, data, revisions = ()) -> str:

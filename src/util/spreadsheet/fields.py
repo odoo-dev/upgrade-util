@@ -83,7 +83,7 @@ def remove_adapter(leaf, is_or, negated):
 #     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
 
-def modify_all_fields(cr, data, revisions=()):
+def modify_all_fields(cr, data):
     spreadsheet = Spreadsheet(data)
     adapters = ()  # commandAdapter tuple
 
@@ -113,7 +113,7 @@ def modify_all_fields(cr, data, revisions=()):
 
     spreadsheet.clean_empty_cells()  ## TODO remove, only do it once per data...
 
-    return spreadsheet.data, transform_revisions_data(revisions, *adapters)
+    return spreadsheet.data, adapters # transform_revisions_data(revisions, *adapters)
 
 
 ## RENAME

@@ -89,7 +89,7 @@ def _magic_spreadsheet_field(cr):
 def apply_in_all_spreadsheets(cr, like_pattern, callback):
     b = False
     # upgrade the initial data and all revisions based on it
-    for attachment_id, _, _, db_datas in read_spreadsheet_initial_data(cr, like_pattern):
+    for attachment_id, res_model, res_id, db_datas in read_spreadsheet_initial_data(cr, like_pattern):
         print("attachment data id:   ", attachment_id)
         print("datas:   ", len(db_datas))
         b = True
@@ -101,22 +101,22 @@ def apply_in_all_spreadsheets(cr, like_pattern, callback):
         ## FIXME  we have to pass in the revisions regardless of the base data stuff
     # upgrade revisions
     # regardless of res_model res_id
-    revisions_data = []
-    revisions_ids = []
+        revisions_data = []
+        revisions_ids = []
 
-    for revision_id, commands in get_revisions(cr, "res_model", "res_id", like_pattern):
-        revisions_data.append(json.loads(commands))
-        revisions_ids.append(revision_id)
-        _, revisions = callback({}, revisions_data)
-        for rev_id, revision in zip(revisions_ids, revisions):
-            cr.execute(
-                """
-                UPDATE spreadsheet_revision
-                    SET commands=%s
-                    WHERE id=%s
-                """,
-                [json.dumps(revision), rev_id],
-            )
+        for revision_id, commands in get_revisions(cr, res_model, res_id, like_pattern):
+            revisions_data.append(json.loads(commands))
+            revisions_ids.append(revision_id)
+            _, revisions = callback({}, revisions_data)
+            for rev_id, revision in zip(revisions_ids, revisions):
+                cr.execute(
+                    """
+                    UPDATE spreadsheet_revision
+                        SET commands=%s
+                        WHERE id=%s
+                    """,
+                    [json.dumps(revision), rev_id],
+                )
     # if b:
     #     _logger.info("upgrading initial data and revisions")
 
@@ -152,8 +152,10 @@ def get_revisions(cr, res_model, res_id, like_pattern):
             SELECT id, commands
               FROM spreadsheet_revision
              WHERE commands LIKE %s
+               AND res_model=%s
+               AND res_id=%s
             """,
-            ["%" + like_pattern + "%"],
+            ["%" + like_pattern + "%", res_model, res_id],
         )
     else:
         # ??????
@@ -162,8 +164,10 @@ def get_revisions(cr, res_model, res_id, like_pattern):
             SELECT id, commands
               FROM spreadsheet_revision
              WHERE commands LIKE %s
+               AND res_model=%s
+               AND res_id=%s
             """,
-            [like_pattern],
+            ["%" + like_pattern + "%", res_model, res_id],
         )
     return cr.fetchall()
 
