@@ -1,4 +1,3 @@
-
 from .data_wrappers import Spreadsheet, create_data_source_from_cmd
 from .misc import apply_in_all_spreadsheets, adapt_view_link_cells, remove_lists, remove_pivots, remove_odoo_charts
 from .revisions import CommandAdapter, Drop, transform_revisions_data, transform_commands
@@ -37,27 +36,29 @@ from odoo.addons.base.maintenance.migrations import util
 #                     (lambda data, revisions_data: rename_model(cr, model, new_model, data, revisions_data)),
 #                 )
 
+
 def modify_all_models(cr, data, revisions=()):
     spreadsheet = Spreadsheet(data)
     adapters = ()
 
     to_remove = [model for model, new_model in util.ENVIRON["__renamed_models"].items() if not new_model]
-    to_change = [{old_model: new_model} for old_model, new_model in util.ENVIRON["__renamed_models"].items() if new_model]
+    to_change = {old_model: new_model for old_model, new_model in util.ENVIRON["__renamed_models"].items() if new_model}
 
     adapters += _remove_model_from_lists(to_remove, spreadsheet)
     adapters += _remove_model_from_pivots(to_remove, spreadsheet)
     adapters += _remove_model_from_charts(to_remove, spreadsheet)
     adapters += _remove_model_from_filters(to_remove, spreadsheet)
     adapters += _remove_model_from_view_link(to_remove, spreadsheet)
+
+    # rename
     adapters += _rename_model_in_list(spreadsheet, to_change)
     adapters += _rename_model_in_pivot(spreadsheet, to_change)
     adapters += _rename_model_in_filters(spreadsheet, to_change)
     adapters += _rename_model_in_charts(spreadsheet, to_change)
     adapters += _rename_model_in_view_link(spreadsheet, to_change)
-    spreadsheet.clean_empty_cells() ## TODO do only once ...
+    spreadsheet.clean_empty_cells()  ## TODO do only once ...
 
     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
-
 
 
 # def remove_model(model: str, data, revisions = ()) -> str:
@@ -83,15 +84,16 @@ def modify_all_models(cr, data, revisions=()):
 
 #     return (CommandAdapter("CREATE_CHART", adapt_insert),)
 
+
 def _rename_model_in_charts(spreadsheet: Spreadsheet, model_change):
     for chart in spreadsheet.odoo_charts:
-        if new:= model_change.get(chart.model, False):
+        if new := model_change.get(chart.model, False):
             chart.model = new
 
     def adapt_insert(cmd):
         if cmd["definition"]["type"].startswith("odoo_"):
             chart = create_data_source_from_cmd(cmd)
-            if new:= model_change.get(chart.model, False):
+            if new := model_change.get(chart.model, False):
                 chart.model = new
 
     return (CommandAdapter("CREATE_CHART", adapt_insert),)
@@ -109,14 +111,16 @@ def _rename_model_in_charts(spreadsheet: Spreadsheet, model_change):
 
 #     return (CommandAdapter("INSERT_ODOO_LIST", adapt_insert),)
 
+
 def _rename_model_in_list(spreadsheet: Spreadsheet, model_change):
     for olist in spreadsheet.lists:
-        if new:= model_change.get(olist.model, False):
+        if new := model_change.get(olist.model, False):
             olist.model = new
 
     def adapt_insert(cmd):
         olist = create_data_source_from_cmd(cmd)
-        if new:= model_change.get(olist.model, False):
+
+        if new := model_change.get(olist.model, False):
             olist.model = new
 
     return (CommandAdapter("INSERT_ODOO_LIST", adapt_insert),)
@@ -137,12 +141,12 @@ def _rename_model_in_list(spreadsheet: Spreadsheet, model_change):
 
 def _rename_model_in_pivot(spreadsheet: Spreadsheet, model_change):
     for pivot in spreadsheet.pivots:
-        if new:= model_change.get(pivot.model, False):
+        if new := model_change.get(pivot.model, False):
             pivot.model = new
 
     def adapt_insert(cmd):
         pivot = create_data_source_from_cmd(cmd)
-        if new:= model_change.get(pivot.model, False):
+        if new := model_change.get(pivot.model, False):
             pivot.model = new
 
     return (CommandAdapter("INSERT_PIVOT", adapt_insert),)
@@ -193,10 +197,11 @@ def _rename_model_in_filters(spreadsheet: Spreadsheet, model_change):
 
 def _rename_model_in_view_link(spreadsheet: Spreadsheet, model_change):
     def adapt_view_link(action):
-        if new:= model_change.get(action["modelName"], False):
+        if new := model_change.get(action["modelName"], False):
             action["modelName"] = new
 
     return adapt_view_link_cells(spreadsheet, adapt_view_link)
+
 
 # def _remove_model_from_lists(model, spreadsheet: Spreadsheet):
 #     lists_to_delete = [list.id for list in spreadsheet.lists if list.model == model]
@@ -206,12 +211,13 @@ def _rename_model_in_view_link(spreadsheet: Spreadsheet, model_change):
 #         lambda list: list.model == model,
 #     )
 
+
 def _remove_model_from_lists(models, spreadsheet: Spreadsheet):
-    lists_to_delete = [list.id for list in spreadsheet.lists if list.model in models]
+    lists_to_delete = [olist.id for olist in spreadsheet.lists if olist.model in models]
     return remove_lists(
         spreadsheet,
         lists_to_delete,
-        lambda list: list.model in models,
+        lambda olist: olist.model in models,  # check the olist rename from list
     )
 
 
@@ -222,6 +228,7 @@ def _remove_model_from_lists(models, spreadsheet: Spreadsheet):
 #         pivots_to_delete,
 #         lambda pivot: pivot.model == model,
 #     )
+
 
 def _remove_model_from_pivots(models, spreadsheet: Spreadsheet):
     pivots_to_delete = [pivot.id for pivot in spreadsheet.pivots if pivot.model in models]
@@ -239,6 +246,7 @@ def _remove_model_from_pivots(models, spreadsheet: Spreadsheet):
 #         chart_to_delete,
 #         lambda chart: chart.model == model,
 #     )
+
 
 def _remove_model_from_charts(models, spreadsheet: Spreadsheet):
     chart_to_delete = [chart.id for chart in spreadsheet.odoo_charts if chart.model in models]
@@ -315,6 +323,7 @@ def _remove_model_from_filters(models, spreadsheet: Spreadsheet):
 #             return Drop
 
 #     return adapt_view_link_cells(spreadsheet, adapt_view_link)
+
 
 def _remove_model_from_view_link(models, spreadsheet: Spreadsheet):
     def adapt_view_link(action):

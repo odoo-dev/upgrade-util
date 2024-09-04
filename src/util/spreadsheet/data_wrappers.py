@@ -21,11 +21,9 @@ structures and how they evolved between versions.
 def create_data_source_from_cmd(cmd):
     if cmd["type"] in ["CREATE_CHART", "UPDATE_CHART"]:
         return OdooChartCmdV16(cmd)
-    elif cmd["type"] == "INSERT_PIVOT":
+    elif cmd["type"] == "INSERT_PIVOT" or cmd["type"] == "RE_INSERT_PIVOT":
         if version_gte("saas~17.1"):
             return InsertPivotCmdV171(cmd)
-        return InsertPivotCmdV16(cmd)
-    elif cmd["type"] == "RE_INSERT_PIVOT":
         return InsertPivotCmdV16(cmd)
     elif cmd["type"] == "INSERT_ODOO_LIST":
         return InsertListCmdV16(cmd)

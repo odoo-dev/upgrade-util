@@ -6,6 +6,7 @@ import logging
 from .fields import modify_all_fields
 from .misc import _magic_spreadsheet_field, write_attachment
 from .models import modify_all_models
+from .data_wrappers import Spreadsheet
 from odoo.addons.base.maintenance.migrations import util
 
 _logger = logging.getLogger(__name__)
@@ -39,8 +40,9 @@ def update_spreadsheets_table_changes(cr):
                 if db_datas:
                     start_time = time.time()
                     data = json.loads(db_datas.tobytes())
-                    data, _ = modify_all_fields(cr, data)
                     data, _ = modify_all_models(cr, data)
+                    data, _ = modify_all_fields(cr, data)
+                    data = Spreadsheet(data).data
                     _logger.info("--- %s seconds to update ---" % (time.time() - start_time))
                     write_attachment(cr, attachment_id, data)
                     _logger.info("--- %s seconds to update  & write ---" % (time.time() - start_time))
@@ -63,8 +65,8 @@ def update_spreadsheets_table_changes(cr):
             for used_res_id, attachment_id, db_datas in ncr:
                 if db_datas:
                     data = json.loads(db_datas.tobytes())
-                    data, _ = modify_all_fields(cr, data)
                     data, _ = modify_all_models(cr, data)
+                    data, _ = modify_all_fields(cr, data)
                     write_attachment(cr, attachment_id, data)
     _logger.info("--- %s seconds to update dashboards ---" % (time.time() - start_time))
 

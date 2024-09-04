@@ -56,13 +56,18 @@ class FunctionCall(Literal):
     args: List[AST]
 
 
+parse_cache = {}
+
+# TODO cache this at some point if we call the same thing  all over again?
 def parse(formula):
     """Parse a spreadsheet formula and return an AST"""
-    tokens = tokenize(formula)
-    tokens = [token for token in tokens if token[0] != "DEBUGGER"]
-    if tokens[0][1] == "=":
-        tokens = tokens[1:]
-    return parse_expression(tokens)
+    if formula not in parse_cache:
+        tokens = tokenize(formula)
+        tokens = [token for token in tokens if token[0] != "DEBUGGER"]
+        if tokens[0][1] == "=":
+            tokens = tokens[1:]
+        parse_cache[formula] = parse_expression(tokens)
+    return parse_cache[formula]
 
 
 def parse_expression(tokens, binding_power=0) -> AST:

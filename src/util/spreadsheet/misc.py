@@ -383,6 +383,7 @@ def remove_data_source_function(content, data_source_ids, functions, filter_ast=
 
     def adapter(fun_call):
         if filter_ast(fun_call):
+            ## not sure tbh
             # remove the func call and set something else instead
             return Literal("BOOLEAN", False)
         return fun_call

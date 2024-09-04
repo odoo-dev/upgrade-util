@@ -47,37 +47,6 @@ def remove_adapter(leaf, is_or, negated):
 #     adapters += _rename_field_in_view_link(cr, spreadsheet, model, old, new)
 #     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
-def modify_all_fields(cr, data, revisions=()):
-    spreadsheet = Spreadsheet(data)
-    adapters = ()
-    c = 0
-
-    to_remove = collections.defaultdict(list)
-    to_change = collections.defaultdict(dict)
-
-
-    for model, fields in util.ENVIRON["__renamed_fields"].items():
-        for old_value, new_value in fields.items():
-            if not new_value:
-                to_remove[model].append(old_value)
-            else:
-                to_change[model][old_value] = new_value
-
-    _remove_field_from_filter_matching(cr, spreadsheet, to_remove)
-    adapters += _remove_field_from_list(cr, spreadsheet, to_remove)
-    adapters += _remove_field_from_pivot(cr, spreadsheet, to_remove)
-    adapters += _remove_field_from_graph(cr, spreadsheet, to_remove)
-    adapters += _remove_field_from_view_link(cr, spreadsheet, to_remove)
-
-    adapters += _rename_field_in_list(cr, spreadsheet, to_change)
-    adapters += _rename_field_in_pivot(cr, spreadsheet, to_change)
-    adapters += _rename_field_in_chart(cr, spreadsheet, to_change)
-    adapters += _rename_field_in_filters(cr, spreadsheet, to_change)
-    adapters += _rename_field_in_view_link(cr, spreadsheet, to_change)
-
-    spreadsheet.clean_empty_cells() ## TODO revemo, only do it once per data...
-
-    return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
 # def rename_fields(cr):
 #     for model, fields in util.ENVIRON["__renamed_fields"].items():
@@ -96,25 +65,58 @@ def modify_all_fields(cr, data, revisions=()):
 #                 )
 
 
+# def remove_field_in_all_spreadsheets(cr, model, field):
+#     apply_in_all_spreadsheets(
+#         cr, field, (lambda data, revisions_data: remove_field(cr, model, field, data, revisions_data))
+#     )
 
-def remove_field_in_all_spreadsheets(cr, model, field):
-    apply_in_all_spreadsheets(
-        cr, field, (lambda data, revisions_data: remove_field(cr, model, field, data, revisions_data))
-    )
+
+# def remove_field(cr, model, field, data, revisions=()):
+
+#     spreadsheet = Spreadsheet(data)
+#     _remove_field_from_filter_matching(cr, spreadsheet, model, field)
+#     adapters = _remove_field_from_list(cr, spreadsheet, model, field)
+#     adapters += _remove_field_from_pivot(cr, spreadsheet, model, field)
+#     adapters += _remove_field_from_graph(cr, spreadsheet, model, field)
+#     adapters += _remove_field_from_view_link(cr, spreadsheet, model, field)
+#     spreadsheet.clean_empty_cells()
+#     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
 
-def remove_field(cr, model, field, data, revisions=()):
-
+def modify_all_fields(cr, data, revisions=()):
     spreadsheet = Spreadsheet(data)
-    _remove_field_from_filter_matching(cr, spreadsheet, model, field)
-    adapters = _remove_field_from_list(cr, spreadsheet, model, field)
-    adapters += _remove_field_from_pivot(cr, spreadsheet, model, field)
-    adapters += _remove_field_from_graph(cr, spreadsheet, model, field)
-    adapters += _remove_field_from_view_link(cr, spreadsheet, model, field)
-    spreadsheet.clean_empty_cells()
+    adapters = ()  # commandAdapter tuple
+
+    to_remove = collections.defaultdict(list)
+    to_change = collections.defaultdict(dict)
+
+    for model, fields in util.ENVIRON["__renamed_fields"].items():
+        for old_value, new_value in fields.items():
+            if not new_value:
+                to_remove[model].append(old_value)
+            else:
+                to_change[model][old_value] = new_value
+
+    # remove
+    _remove_field_from_filter_matching(cr, spreadsheet, to_remove)
+    adapters += _remove_field_from_list(cr, spreadsheet, to_remove)
+    adapters += _remove_field_from_pivot(cr, spreadsheet, to_remove)
+    adapters += _remove_field_from_graph(cr, spreadsheet, to_remove)
+    adapters += _remove_field_from_view_link(cr, spreadsheet, to_remove)
+
+    # rename
+    adapters += _rename_field_in_list(cr, spreadsheet, to_change)
+    adapters += _rename_field_in_pivot(cr, spreadsheet, to_change)
+    adapters += _rename_field_in_chart(cr, spreadsheet, to_change)
+    adapters += _rename_field_in_filters(cr, spreadsheet, to_change)
+    adapters += _rename_field_in_view_link(cr, spreadsheet, to_change)
+
+    spreadsheet.clean_empty_cells()  ## TODO remove, only do it once per data...
+
     return spreadsheet.data, transform_revisions_data(revisions, *adapters)
 
 
+## RENAME
 def _rename_function_fields(content, data_source_ids, functions, old, new):
     def adapter(fun_call):
         for arg in fun_call.args[1:]:
@@ -134,22 +136,76 @@ def _rename_field_in_chain(cr, model, field_model, field_chain, old, new) -> str
     return domain[0][0]
 
 
-def _rename_field_in_list(cr, spreadsheet: Spreadsheet, model, old, new):
+# def _rename_field_in_list(cr, spreadsheet: Spreadsheet, model, old, new):
+#     list_ids = set()
+
+#     def rename(olist):
+#         _rename_data_source_field(cr, olist, model, old, new)
+#         if olist.model == model:
+#             list_ids.add(olist.id)
+#             olist.fields = _rename_fields(old, new, olist.fields)
+
+#     for olist in spreadsheet.lists:
+#         rename(olist)
+
+#     for cell in spreadsheet.cells:
+#         cell["content"] = _rename_function_fields(
+#             cell["content"], list_ids, {"ODOO.LIST", "ODOO.LIST.HEADER"}, old, new
+#         )
+
+#     list_models = {olist.id: olist.model for olist in spreadsheet.lists}
+
+#     def collect_list(cmd):
+#         olist = create_data_source_from_cmd(cmd)
+#         list_models[olist.id] = olist.model
+
+#     def rename_re_insert(cmd):
+#         olist = create_data_source_from_cmd(cmd)
+#         if list_models[olist.id] == model:
+#             olist.fields = _rename_fields(old, new, olist.fields)
+
+#     return (
+#         CommandAdapter("INSERT_ODOO_LIST", collect_list),
+#         CommandAdapter("INSERT_ODOO_LIST", lambda cmd: rename(create_data_source_from_cmd(cmd))),
+#         CommandAdapter("RE_INSERT_ODOO_LIST", rename_re_insert),
+#         CommandAdapter(
+#             "UPDATE_CELL",
+#             lambda cmd: dict(
+#                 cmd,
+#                 content=_rename_function_fields(
+#                     cmd.get("content"), list_ids, {"ODOO.LIST", "ODOO.LIST.HEADER"}, old, new
+#                 ),
+#             ),
+#         ),
+#     )
+
+
+def _rename_field_in_list(cr, spreadsheet: Spreadsheet, fields_changes):
     list_ids = set()
 
+    list_ids_per_model = collections.defaultdict(set)
+
     def rename(olist):
-        _rename_data_source_field(cr, olist, model, old, new)
-        if olist.model == model:
-            list_ids.add(olist.id)
-            olist.fields = _rename_fields(old, new, olist.fields)
+        for model in fields_changes:
+            for old, new in fields_changes[model].items():
+                _rename_data_source_field(cr, olist, model, old, new)
+                if olist.model == model:
+                    list_ids.add(olist.id)
+                    list_ids_per_model[model].add(olist.id)
+                    olist.fields = _rename_fields(old, new, olist.fields)
 
     for olist in spreadsheet.lists:
         rename(olist)
 
+    def trucmachin(content):
+        for model in list_ids_per_model:
+            list_ids = list_ids_per_model[model]
+            for old, new in fields_changes[model].items():
+                content = _rename_function_fields(content, list_ids, {"ODOO.LIST", "ODOO.LIST.HEADER"}, old, new)
+        return content
+
     for cell in spreadsheet.cells:
-        cell["content"] = _rename_function_fields(
-            cell["content"], list_ids, {"ODOO.LIST", "ODOO.LIST.HEADER"}, old, new
-        )
+        cell["content"] = trucmachin(cell["content"])
 
     list_models = {olist.id: olist.model for olist in spreadsheet.lists}
 
@@ -159,22 +215,21 @@ def _rename_field_in_list(cr, spreadsheet: Spreadsheet, model, old, new):
 
     def rename_re_insert(cmd):
         olist = create_data_source_from_cmd(cmd)
-        if list_models[olist.id] == model:
-            olist.fields = _rename_fields(old, new, olist.fields)
+        if fields := fields_changes.get(list_models[olist.id], {}):
+            for old, new in fields.items():
+                olist.fields = _rename_fields(old, new, olist.fields)
+
+    def modify_cmd_content(cmd):
+        if "content" in cmd:
+            return dict(cmd, content=trucmachin(cmd.get("content")))
+        else:
+            return cmd
 
     return (
         CommandAdapter("INSERT_ODOO_LIST", collect_list),
         CommandAdapter("INSERT_ODOO_LIST", lambda cmd: rename(create_data_source_from_cmd(cmd))),
         CommandAdapter("RE_INSERT_ODOO_LIST", rename_re_insert),
-        CommandAdapter(
-            "UPDATE_CELL",
-            lambda cmd: dict(
-                cmd,
-                content=_rename_function_fields(
-                    cmd.get("content"), list_ids, {"ODOO.LIST", "ODOO.LIST.HEADER"}, old, new
-                ),
-            ),
-        ),
+        CommandAdapter("UPDATE_CELL", modify_cmd_content),
     )
 
 
@@ -193,55 +248,124 @@ def _rename_fields(old: str, new: str, fields: Iterable[str]) -> Iterable[str]:
             renamed.append(field)
     return renamed
 
+# def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, model, old, new):
+#     pivot_ids = set()
 
-def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, model, old, new):
+#     def rename(pivot):
+#         _rename_data_source_field(cr, pivot, model, old, new)
+#         if pivot.model == model:
+#             pivot_ids.add(pivot.id)
+#             pivot.col_group_by = _rename_fields(old, new, pivot.col_group_by)
+#             pivot.row_group_by = _rename_fields(old, new, pivot.row_group_by)
+#             pivot.measures = _rename_fields(old, new, pivot.measures)
+
+#     for pivot in spreadsheet.pivots:
+#         rename(pivot)
+
+#     for cell in spreadsheet.cells:
+#         cell["content"] = _rename_function_fields(
+#             cell["content"], pivot_ids, {"ODOO.PIVOT", "ODOO.PIVOT.HEADER"}, old, new
+#         )
+
+#     def adapt_insert(cmd):
+#         pivot = create_data_source_from_cmd(cmd)
+#         rename(pivot)
+#         adapt_pivot_table(cmd)
+
+#     def adapt_pivot_table(cmd):
+#         table = cmd["table"]
+#         for row in table["cols"]:
+#             for cell in row:
+#                 cell["fields"] = _rename_fields(old, new, cell["fields"])
+#                 # value can be the name of the measure (a field name)
+#                 cell["values"] = _rename_fields(old, new, cell["values"])
+#         for row in table["rows"]:
+#             row["fields"] = _rename_fields(old, new, row["fields"])
+#             row["values"] = _rename_fields(old, new, row["values"])
+#         cmd["table"]["measures"] = _rename_fields(old, new, table["measures"])
+
+#     return (
+#         CommandAdapter("INSERT_PIVOT", adapt_insert),
+#         CommandAdapter("RE_INSERT_PIVOT", adapt_pivot_table),
+#         CommandAdapter(
+#             "UPDATE_CELL",
+#             lambda cmd: dict(
+#                 cmd,
+#                 content=_rename_function_fields(
+#                     cmd.get("content"), pivot_ids, {"ODOO.PIVOT", "ODOO.PIVOT.HEADER"}, old, new
+#                 ),
+#             ),
+#         ),
+#     )
+
+
+
+def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, fields_changes):
     pivot_ids = set()
 
+    pivot_ids_per_model = collections.defaultdict(set)
+
     def rename(pivot):
-        _rename_data_source_field(cr, pivot, model, old, new)
-        if pivot.model == model:
-            pivot_ids.add(pivot.id)
-            pivot.col_group_by = _rename_fields(old, new, pivot.col_group_by)
-            pivot.row_group_by = _rename_fields(old, new, pivot.row_group_by)
-            pivot.measures = _rename_fields(old, new, pivot.measures)
+        for model in fields_changes:
+            for old, new in fields_changes[model].items():
+                _rename_data_source_field(cr, pivot, model, old, new)
+                if pivot.model == model:
+                    pivot_ids.add(pivot.id)
+                    pivot_ids_per_model[model].add(pivot.id)
+                    pivot.col_group_by = _rename_fields(old, new, pivot.col_group_by)
+                    pivot.row_group_by = _rename_fields(old, new, pivot.row_group_by)
+                    pivot.measures = _rename_fields(old, new, pivot.measures)
 
     for pivot in spreadsheet.pivots:
         rename(pivot)
 
+    def trucmachin(content):
+        for model in pivot_ids_per_model:
+            list_ids = pivot_ids_per_model[model]
+            for old, new in fields_changes[model].items():
+                # TODORAR change function defition as we apply
+                # this after the migration of revision,
+                # so right now, odoo.?pivot no longer exists ....
+                content = _rename_function_fields(content, list_ids, {"ODOO.PIVOT", "ODOO.PIVOT.HEADER"}, old, new)
+        return content
+
+
     for cell in spreadsheet.cells:
-        cell["content"] = _rename_function_fields(
-            cell["content"], pivot_ids, {"ODOO.PIVOT", "ODOO.PIVOT.HEADER"}, old, new
-        )
+        cell["content"] = trucmachin(cell["content"])
+
+    pivot_models = {pivot.id: pivot.model for pivot in spreadsheet.pivots}
 
     def adapt_insert(cmd):
         pivot = create_data_source_from_cmd(cmd)
         rename(pivot)
+        pivot_models[pivot.id] = pivot.model
         adapt_pivot_table(cmd)
 
     def adapt_pivot_table(cmd):
-        table = cmd["table"]
-        for row in table["cols"]:
-            for cell in row:
-                cell["fields"] = _rename_fields(old, new, cell["fields"])
-                # value can be the name of the measure (a field name)
-                cell["values"] = _rename_fields(old, new, cell["values"])
-        for row in table["rows"]:
-            row["fields"] = _rename_fields(old, new, row["fields"])
-            row["values"] = _rename_fields(old, new, row["values"])
-        cmd["table"]["measures"] = _rename_fields(old, new, table["measures"])
+        pivot = create_data_source_from_cmd(cmd)
+        if fields := fields_changes.get(pivot_models[pivot.id], {}):
+            for old, new in fields.items():
+                table = cmd["table"]
+                for row in table["cols"]:
+                    for cell in row:
+                        cell["fields"] = _rename_fields(old, new, cell["fields"])
+                        # value can be the name of the measure (a field name)
+                        cell["values"] = _rename_fields(old, new, cell["values"])
+                for row in table["rows"]:
+                    row["fields"] = _rename_fields(old, new, row["fields"])
+                    row["values"] = _rename_fields(old, new, row["values"])
+                cmd["table"]["measures"] = _rename_fields(old, new, table["measures"])
+
+    def modify_cmd_content(cmd):
+        if "content" in cmd:
+            return dict(cmd, content=trucmachin(cmd.get("content")))
+        else:
+            return cmd
 
     return (
         CommandAdapter("INSERT_PIVOT", adapt_insert),
         CommandAdapter("RE_INSERT_PIVOT", adapt_pivot_table),
-        CommandAdapter(
-            "UPDATE_CELL",
-            lambda cmd: dict(
-                cmd,
-                content=_rename_function_fields(
-                    cmd.get("content"), pivot_ids, {"ODOO.PIVOT", "ODOO.PIVOT.HEADER"}, old, new
-                ),
-            ),
-        ),
+        CommandAdapter("UPDATE_CELL", modify_cmd_content),
     )
 
 
@@ -257,27 +381,6 @@ def _rename_data_source_field(cr, data_source, model, old, new):
             data_source.order_by = _rename_order_by(data_source.order_by, old, new)
 
 
-def _remove_data_source_field(cr, data_source, model, field):
-    if data_source.model == model:
-        data_source.domain = (
-            _adapt_one_domain(
-                cr, model, field, "ignored", data_source.model, data_source.domain, remove_adapter, force_adapt=True
-            )
-            or data_source.domain
-        )
-
-        adapt_context(data_source.context, field, "ignored")
-        if data_source.order_by:
-            data_source.order_by = _remove_order_by(data_source.order_by, field)
-
-
-def _remove_order_by(order_by, field):
-    if isinstance(order_by, list):
-        return [order for order in order_by if order["field"] != field]
-    if order_by and order_by["field"] == field:
-        return None
-    return order_by
-
 def _rename_order_by(order_by, old, new):
     if isinstance(order_by, list):
         return [_rename_order_by(order, old, new) for order in order_by]
@@ -286,14 +389,36 @@ def _rename_order_by(order_by, old, new):
     return order_by
 
 
-def _rename_field_in_chart(cr, spreadsheet: Spreadsheet, model, old, new):
+# def _rename_field_in_chart(cr, spreadsheet: Spreadsheet, model, old, new):
+#     def rename(chart):
+#         _rename_data_source_field(cr, chart, model, old, new)
+#         if chart.model == model:
+#             if chart.measure == old:
+#                 chart.measure = new
+#             chart.group_by = _rename_fields(old, new, chart.group_by)
+#         return chart
+
+#     for chart in spreadsheet.odoo_charts:
+#         rename(chart)
+
+#     def adapt_create_chart(cmd):
+#         if cmd["definition"]["type"].startswith("odoo_"):
+#             chart = create_data_source_from_cmd(cmd)
+#             rename(chart)
+
+#     return (CommandAdapter("CREATE_CHART", adapt_create_chart),)
+
+
+def _rename_field_in_chart(cr, spreadsheet: Spreadsheet, fields_changes):
     def rename(chart):
-        _rename_data_source_field(cr, chart, model, old, new)
-        if chart.model == model:
-            if chart.measure == old:
-                chart.measure = new
-            chart.group_by = _rename_fields(old, new, chart.group_by)
-        return chart
+        for model in fields_changes:
+            for old, new in fields_changes[model].items():
+                _rename_data_source_field(cr, chart, model, old, new)
+                if chart.model == model:
+                    if chart.measure == old:
+                        chart.measure = new
+                    chart.group_by = _rename_fields(old, new, chart.group_by)
+                # return chart ## TODORAR investigate
 
     for chart in spreadsheet.odoo_charts:
         rename(chart)
@@ -306,21 +431,63 @@ def _rename_field_in_chart(cr, spreadsheet: Spreadsheet, model, old, new):
     return (CommandAdapter("CREATE_CHART", adapt_create_chart),)
 
 
-def _rename_field_in_filters(cr, spreadsheet: Spreadsheet, model, old, new):
+
+# def _rename_field_in_filters(cr, spreadsheet: Spreadsheet, model, old, new):
+#     pivot_models = {pivot.id: pivot.model for pivot in spreadsheet.pivots}
+#     list_models = {olist.id: olist.model for olist in spreadsheet.lists}
+#     chart_models = {chart.id: chart.model for chart in spreadsheet.odoo_charts}
+
+#     def adapt_filter(cmd):
+#         for pivot_id, field in cmd["pivot"].items():
+#             pivot_model = pivot_models[pivot_id]
+#             field["chain"] = _rename_field_in_chain(cr, pivot_model, model, field["chain"], old, new)
+#         for list_id, field in cmd["list"].items():
+#             list_model = list_models[list_id]
+#             field["chain"] = _rename_field_in_chain(cr, list_model, model, field["chain"], old, new)
+#         for chart_id, field in cmd["chart"].items():
+#             chart_model = chart_models[chart_id]
+#             field["chain"] = _rename_field_in_chain(cr, chart_model, model, field["chain"], old, new)
+
+#     def collect_pivot(cmd):
+#         pivot = create_data_source_from_cmd(cmd)
+#         pivot_models[pivot.id] = pivot.model
+
+#     def collect_list(cmd):
+#         olist = create_data_source_from_cmd(cmd)
+#         list_models[olist.id] = olist.model
+
+#     def collect_charts(cmd):
+#         if cmd["definition"]["type"].startswith("odoo_"):
+#             chart = create_data_source_from_cmd(cmd)
+#             chart_models[chart.id] = chart.model
+
+#     return (
+#         CommandAdapter("INSERT_PIVOT", collect_pivot),
+#         CommandAdapter("INSERT_ODOO_LIST", collect_list),
+#         CommandAdapter("CREATE_CHART", collect_charts),
+#         CommandAdapter("ADD_GLOBAL_FILTER", adapt_filter),
+#         CommandAdapter("EDIT_GLOBAL_FILTER", adapt_filter),
+#     )
+
+
+def _rename_field_in_filters(cr, spreadsheet: Spreadsheet, fields_changes):
+
     pivot_models = {pivot.id: pivot.model for pivot in spreadsheet.pivots}
     list_models = {olist.id: olist.model for olist in spreadsheet.lists}
     chart_models = {chart.id: chart.model for chart in spreadsheet.odoo_charts}
 
+
+    def adapt_filter_per_ds(cmd, ds_type, ds_models):
+        for ds_id, field in cmd[ds_type].items():
+            ds_model = ds_models[ds_id]
+            for model in fields_changes:
+                for old, new in fields_changes[model].items():
+                    field["chain"] = _rename_field_in_chain(cr, ds_model, model, field["chain"], old, new)
+
     def adapt_filter(cmd):
-        for pivot_id, field in cmd["pivot"].items():
-            pivot_model = pivot_models[pivot_id]
-            field["chain"] = _rename_field_in_chain(cr, pivot_model, model, field["chain"], old, new)
-        for list_id, field in cmd["list"].items():
-            list_model = list_models[list_id]
-            field["chain"] = _rename_field_in_chain(cr, list_model, model, field["chain"], old, new)
-        for chart_id, field in cmd["chart"].items():
-            chart_model = chart_models[chart_id]
-            field["chain"] = _rename_field_in_chain(cr, chart_model, model, field["chain"], old, new)
+        adapt_filter_per_ds(cmd, "pivot", pivot_models)
+        adapt_filter_per_ds(cmd, "list", list_models)
+        adapt_filter_per_ds(cmd, "chart", chart_models)
 
     def collect_pivot(cmd):
         pivot = create_data_source_from_cmd(cmd)
@@ -348,24 +515,78 @@ def match_markdown_link(content):
     return re.match(r"\[.*\]\(odoo://view/(.*)\)", content)
 
 
-def _rename_field_in_view_link(cr, spreadsheet: Spreadsheet, model, old, new):
+# def _rename_field_in_view_link(cr, spreadsheet: Spreadsheet, model, old, new):
+#     def adapt_view_link(action):
+#         if action["modelName"] != model:
+#             return
+#         domain = _adapt_one_domain(cr, model, old, new, action["modelName"], action["domain"])
+#         if domain:
+#             if isinstance(action["domain"], str):
+#                 domain = str(domain)
+#             action["domain"] = domain
+#         adapt_context(action["context"], old, new)
+
+#     return adapt_view_link_cells(spreadsheet, adapt_view_link)
+
+def _rename_field_in_view_link(cr, spreadsheet: Spreadsheet, fields_changes):
     def adapt_view_link(action):
-        if action["modelName"] != model:
+        model = action["modelName"]
+        if fields:= fields_changes.get(model, {}):
+            for old, new in fields.items():
+                domain = _adapt_one_domain(cr, model, old, new, model, action["domain"])
+                if domain:
+                    if isinstance(action["domain"], str):
+                        domain = str(domain)
+                    action["domain"] = domain
+                adapt_context(action["context"], old, new)
+        else:
             return
-        domain = _adapt_one_domain(cr, model, old, new, action["modelName"], action["domain"])
-        if domain:
-            if isinstance(action["domain"], str):
-                domain = str(domain)
-            action["domain"] = domain
-        adapt_context(action["context"], old, new)
 
     return adapt_view_link_cells(spreadsheet, adapt_view_link)
 
 
+
 ## Removal
 
+# def _remove_data_source_field(cr, data_source, model, field):
+#     if data_source.model == model:
+#         data_source.domain = (
+#             _adapt_one_domain(
+#                 cr, model, field, "ignored", data_source.model, data_source.domain, remove_adapter, force_adapt=True
+#             )
+#             or data_source.domain
+#         )
 
-def _remove_list_functions(content, list_ids, field): # .????
+#         adapt_context(data_source.context, field, "ignored")
+#         if data_source.order_by:
+#             data_source.order_by = _remove_order_by(data_source.order_by, field)
+
+
+def _remove_data_source_field(cr, data_source, models):
+    model = data_source.model
+    if fields := models.get(model, []):
+        for field in fields:
+            data_source.domain = (
+                _adapt_one_domain(
+                    cr, model, field, "ignored", data_source.model, data_source.domain, remove_adapter, force_adapt=True
+                )
+                or data_source.domain
+            )
+
+            adapt_context(data_source.context, field, "ignored")
+            if data_source.order_by:
+                data_source.order_by = _remove_order_by(data_source.order_by, field)
+
+
+def _remove_order_by(order_by, field):
+    if isinstance(order_by, list):
+        return [order for order in order_by if order["field"] != field]
+    if order_by and order_by["field"] == field:
+        return None
+    return order_by
+
+
+def _remove_list_functions(content, list_ids, field):  # .????
     """Remove functions such as ODOO.LIST(1, 'field') or ODOO.LIST.HEADER(1, 'field')."""
 
     def filter_func(func_call_ast):
@@ -416,28 +637,39 @@ def _remove_field_from_list(cr, spreadsheet: Spreadsheet, models):
     for olist in spreadsheet.lists:
         _remove_field(olist)
 
-    def adapt_insert(cmd):
-        olist = create_data_source_from_cmd(cmd)
-        _remove_field(olist)
-
     # collect all list models inserted by INSERT_ODOO_LIST
     # because we need the models to adapt RE_INSERT_ODOO_LIST
     list_models = {olist.id: olist.model for olist in spreadsheet.lists}
 
     def collect_list(cmd):
         olist = create_data_source_from_cmd(cmd)
+        print("collecting list?\n"*20)
+        print(cmd)
+        print(olist.id)
+        print(list_models)
         list_models[olist.id] = olist.model
 
-    def adapt_re_insert(cmd):
+    def adapt_insert(cmd):
         olist = create_data_source_from_cmd(cmd)
-        if models.get(list_models[olist.id], False):
-            _remove_field(olist)
+        _remove_field(olist)
+
+    def adapt_re_insert(cmd):
+        try:
+            olist = create_data_source_from_cmd(cmd)
+            if models.get(list_models[olist.id], False):
+                _remove_field(olist)
+        except:
+            print("oups cassé\n"*20)
+            print(cmd)
+            print(olist.id)
+            print(list_models)
 
     return (
         CommandAdapter("INSERT_ODOO_LIST", collect_list),
         CommandAdapter("INSERT_ODOO_LIST", adapt_insert),
         CommandAdapter("RE_INSERT_ODOO_LIST", adapt_re_insert),
     )
+
 
 # def _remove_field_from_pivot(cr, spreadsheet: Spreadsheet, model, field):
 #     def _remove_field(pivot):
@@ -456,6 +688,7 @@ def _remove_field_from_list(cr, spreadsheet: Spreadsheet, models):
 
 #     return (CommandAdapter("INSERT_PIVOT", adapt_insert),) ## missing update pivot with the field...
 
+
 def _remove_field_from_pivot(cr, spreadsheet: Spreadsheet, models):
     def _remove_field(pivot):
         _remove_data_source_field(cr, pivot, models)
@@ -468,14 +701,17 @@ def _remove_field_from_pivot(cr, spreadsheet: Spreadsheet, models):
         _remove_field(pivot)
 
     def adapt_insert(cmd):
+        print("coucou")
+        print(cmd)
         pivot = create_data_source_from_cmd(cmd)
         _remove_field(pivot)
 
-    return (CommandAdapter("INSERT_PIVOT", adapt_insert),
-            CommandAdapter("RE_INSERT_PIVOT", adapt_insert),
-            # CommandAdapter("RE_INSERT_PIVOT", adapt_insert),
-        )
-        ## missing update pivot with the field...
+    return (
+        CommandAdapter("INSERT_PIVOT", adapt_insert),
+        CommandAdapter("RE_INSERT_PIVOT", adapt_insert),
+        # CommandAdapter("RE_INSERT_PIVOT", adapt_insert),
+    )
+    ## missing update pivot with the field...
 
 
 # def _remove_field_from_graph(cr, spreadsheet: Spreadsheet, model, field):
@@ -493,6 +729,7 @@ def _remove_field_from_pivot(cr, spreadsheet: Spreadsheet, models):
 #             _remove_field(chart)
 
 #     return (CommandAdapter("CREATE_CHART", adapt_create_chart),)
+
 
 def _remove_field_from_graph(cr, spreadsheet: Spreadsheet, models):
     def _remove_field(chart):
@@ -521,15 +758,19 @@ def _remove_field_from_graph(cr, spreadsheet: Spreadsheet, models):
 
 #     return adapt_view_link_cells(spreadsheet, adapt_view_link)
 
+
 def _remove_field_from_view_link(cr, spreadsheet: Spreadsheet, models):
     def adapt_view_link(action):
         model = action["modelName"]
         if fields := models.get(model, []):
             for field in fields:
                 clean_context(action["context"], field)
-                action["domain"] = _adapt_one_domain(
-                    cr, model, field, "ignored", model, action["domain"], remove_adapter, force_adapt=True
-                ) or action["domain"]
+                action["domain"] = (
+                    _adapt_one_domain(
+                        cr, model, field, "ignored", model, action["domain"], remove_adapter, force_adapt=True
+                    )
+                    or action["domain"]
+                )
 
     return adapt_view_link_cells(spreadsheet, adapt_view_link)
 
