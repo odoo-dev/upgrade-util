@@ -245,4 +245,5 @@ class TokenizingChars:
     def current_starts_with(self, string):
         if self.current != string[0]:
             return False
+        return self.text[self.current_index:].startswith(string)
         return all(self.text[self.current_index + j] == string[j] for j in range(1, len(string)))

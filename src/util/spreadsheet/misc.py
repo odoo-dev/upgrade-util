@@ -1,6 +1,7 @@
 import re
-import json
+import orjson
 import logging
+import time
 
 from typing import Union, Callable, Dict, List
 
@@ -36,7 +37,7 @@ def read_spreadsheet_snapshots(cr, like_pattern=""):
     # TODO rename 'like_pattern', it's not LIKE because LIKE doesn't work because the field is of type bytea
     for attachment_id, res_model, res_id, db_datas in cr.fetchall():
         if db_datas:
-            yield attachment_id, res_model, res_id, json.loads(db_datas.tobytes())
+            yield attachment_id, res_model, res_id, orjson.loads(db_datas.tobytes())
 
 
 def read_spreadsheet_initial_data(cr, like_pattern=""):
@@ -54,7 +55,7 @@ def read_spreadsheet_initial_data(cr, like_pattern=""):
         # TODO there are excel files in there!
         for document_id, attachment_id, db_datas in cr.fetchall():
             if db_datas:
-                yield attachment_id, "documents.document", document_id, json.loads(db_datas.tobytes())
+                yield attachment_id, "documents.document", document_id, orjson.loads(db_datas.tobytes())
 
     if util.table_exists(cr, "spreadsheet_dashboard"):
         data_field = _magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
@@ -70,7 +71,7 @@ def read_spreadsheet_initial_data(cr, like_pattern=""):
         )
         for attachment_id, res_model, res_id, db_datas in cr.fetchall():
             if db_datas:
-                yield attachment_id, res_model, res_id, json.loads(db_datas.tobytes())
+                yield attachment_id, res_model, res_id, orjson.loads(db_datas.tobytes())
 
 
 # TODORAR good joke but still, let's find some better name at least
@@ -105,7 +106,7 @@ def apply_in_all_spreadsheets(cr, like_pattern, callback):
         revisions_ids = []
 
         for revision_id, commands in get_revisions(cr, res_model, res_id, like_pattern):
-            revisions_data.append(json.loads(commands))
+            revisions_data.append(orjson.loads(commands))
             revisions_ids.append(revision_id)
             _, revisions = callback({}, revisions_data)
             for rev_id, revision in zip(revisions_ids, revisions):
@@ -115,22 +116,17 @@ def apply_in_all_spreadsheets(cr, like_pattern, callback):
                         SET commands=%s
                         WHERE id=%s
                     """,
-                    [json.dumps(revision), rev_id],
+                    [orjson.dumps(revision, option=orjson.OPT_NON_STR_KEYS).decode(), rev_id],
                 )
-    # if b:
-    #     _logger.info("upgrading initial data and revisions")
 
     b = False
     # upgrade snapshots
     for attachment_id, _res_model, _res_id, db_datas in read_spreadsheet_snapshots(cr, like_pattern):
         print("attachment snapshot id:   ", attachment_id)
 
-        b = True
         data, _ = callback(db_datas, [])
         write_attachment(cr, attachment_id, data)
 
-    # if b:
-    #     _logger.info("upgrading snapshots")
 
 
 def write_attachment(cr, attachment_id, data):
@@ -141,7 +137,7 @@ def write_attachment(cr, attachment_id, data):
            SET db_datas=%s
          WHERE id=%s
         """,
-        [json.dumps(data).encode(), attachment_id],
+        [orjson.dumps(data, option=orjson.OPT_NON_STR_KEYS), attachment_id],
     )
 
 
@@ -173,6 +169,7 @@ def get_revisions(cr, res_model, res_id, like_pattern):
 
 
 def upgrade_data(cr, upgrade_callback):
+    start = time.time()
     for attachment_id, _res_model, _res_id, data in read_spreadsheet_attachments(cr):
         upgraded_data = upgrade_callback(load(data))
         cr.execute(
@@ -181,9 +178,9 @@ def upgrade_data(cr, upgrade_callback):
                 SET db_datas=%s
                 WHERE id=%s
             """,
-            [json.dumps(upgraded_data).encode(), attachment_id],
+            [orjson.dumps(upgraded_data, option=orjson.OPT_NON_STR_KEYS), attachment_id],
         )
-    _logger.info("spreadsheet json data upgraded")
+    _logger.info("spreadsheet json data upgraded in %s seconds" % (time.time() - start))
 
 
 def transform_data_source_functions(content, data_source_ids, functions, adapter):
@@ -228,11 +225,11 @@ def adapt_view_link_cells(spreadsheet: Spreadsheet, adapter: Callable[[str], Uni
         if not match:
             return content
         label = match.group(1)
-        view_description = json.loads(match.group(2))
+        view_description = orjson.loads(match.group(2))
         result = adapter(view_description["action"])
         if result == Drop:
             return ""
-        return f"[{label}](odoo://view/{json.dumps(view_description)})"
+        return f"[{label}](odoo://view/{orjson.dumps(view_description, option=orjson.OPT_NON_STR_KEYS).decode()})"
 
     def adapt_view_link_command(cmd):
         if not cmd.get("content", None):
@@ -303,9 +300,9 @@ def remove_lists(spreadsheet: Spreadsheet, list_ids: List[str], insert_cmd_predi
         cell["content"] = remove_data_source_function(cell["content"], list_ids, ["ODOO.LIST", "ODOO.LIST.HEADER"])
 
     def adapt_insert(cmd):
-        list = create_data_source_from_cmd(cmd)
-        if insert_cmd_predicate(list):
-            list_ids.append(list.id)
+        olist = create_data_source_from_cmd(cmd)
+        if insert_cmd_predicate(olist):
+            list_ids.append(olist.id)
             return Drop
         return cmd
 
