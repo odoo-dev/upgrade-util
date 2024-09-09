@@ -87,48 +87,6 @@ def _magic_spreadsheet_field(cr):
     return cr.fetchone()[0] and "spreadsheet_binary_data" or "data"
 
 
-def apply_in_all_spreadsheets(cr, like_pattern, callback):
-    b = False
-    # upgrade the initial data and all revisions based on it
-    for attachment_id, res_model, res_id, db_datas in read_spreadsheet_initial_data(cr, like_pattern):
-        print("attachment data id:   ", attachment_id)
-        print("datas:   ", len(db_datas))
-        b = True
-
-        data, _ = callback(db_datas, [])
-        write_attachment(cr, attachment_id, data)
-
-        ## FIXME TODORAR batch the calls
-        ## FIXME  we have to pass in the revisions regardless of the base data stuff
-    # upgrade revisions
-    # regardless of res_model res_id
-        revisions_data = []
-        revisions_ids = []
-
-        for revision_id, commands in get_revisions(cr, res_model, res_id, like_pattern):
-            revisions_data.append(orjson.loads(commands))
-            revisions_ids.append(revision_id)
-            _, revisions = callback({}, revisions_data)
-            for rev_id, revision in zip(revisions_ids, revisions):
-                cr.execute(
-                    """
-                    UPDATE spreadsheet_revision
-                        SET commands=%s
-                        WHERE id=%s
-                    """,
-                    [orjson.dumps(revision, option=orjson.OPT_NON_STR_KEYS).decode(), rev_id],
-                )
-
-    b = False
-    # upgrade snapshots
-    for attachment_id, _res_model, _res_id, db_datas in read_spreadsheet_snapshots(cr, like_pattern):
-        print("attachment snapshot id:   ", attachment_id)
-
-        data, _ = callback(db_datas, [])
-        write_attachment(cr, attachment_id, data)
-
-
-
 def write_attachment(cr, attachment_id, data):
     _logger.info("replacing attachment %s", attachment_id)
     cr.execute(
@@ -139,33 +97,6 @@ def write_attachment(cr, attachment_id, data):
         """,
         [orjson.dumps(data, option=orjson.OPT_NON_STR_KEYS), attachment_id],
     )
-
-
-def get_revisions(cr, res_model, res_id, like_pattern):
-    if util.version_gte("16.0"):
-        cr.execute(
-            """
-            SELECT id, commands
-              FROM spreadsheet_revision
-             WHERE commands LIKE %s
-               AND res_model=%s
-               AND res_id=%s
-            """,
-            ["%" + like_pattern + "%", res_model, res_id],
-        )
-    else:
-        # ??????
-        cr.execute(
-            """
-            SELECT id, commands
-              FROM spreadsheet_revision
-             WHERE commands LIKE %s
-               AND res_model=%s
-               AND res_id=%s
-            """,
-            ["%" + like_pattern + "%", res_model, res_id],
-        )
-    return cr.fetchall()
 
 
 def upgrade_data(cr, upgrade_callback):
@@ -236,15 +167,17 @@ def adapt_view_link_cells(spreadsheet: Spreadsheet, adapter: Callable[[str], Uni
             return cmd
         return dict(cmd, content=adapt_view_link(cmd.get("content")))
 
-    for cell in spreadsheet.cells:
+    # for cell in spreadsheet.cells:
+    def update_cell_content(cell):
         cell["content"] = adapt_view_link(cell["content"])
-    return (CommandAdapter("UPDATE_CELL", lambda cmd: adapt_view_link_command(cmd)),)
+    return (lambda cell: update_cell_content(cell),), (CommandAdapter("UPDATE_CELL", lambda cmd: adapt_view_link_command(cmd)),)
 
 
 def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_predicate: Callable[[Dict], bool]):
     spreadsheet.delete_pivots(*pivot_ids)
 
-    for cell in spreadsheet.cells:
+    # for cell in spreadsheet.cells:
+    def update_cell_content(cell):
         cell["content"] = remove_data_source_function(cell["content"], pivot_ids, ["ODOO.PIVOT", "ODOO.PIVOT.HEADER"])
 
     def adapt_insert(cmd):
@@ -280,9 +213,9 @@ def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_pre
                 return Drop
             cmd["content"] = content
         else:
-            return cmd # not sure
+            return cmd  # not sure
 
-    return (
+    return (lambda cell: update_cell_content(cell),), (
         CommandAdapter("INSERT_PIVOT", adapt_insert),
         CommandAdapter("RE_INSERT_PIVOT", adapt_re_insert),
         CommandAdapter("UPDATE_ODOO_PIVOT_DOMAIN", adapt_cmd_with_pivotId),
@@ -296,7 +229,8 @@ def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_pre
 
 def remove_lists(spreadsheet: Spreadsheet, list_ids: List[str], insert_cmd_predicate: Callable[[Dict], bool]):
     spreadsheet.delete_lists(*list_ids)
-    for cell in spreadsheet.cells:
+
+    def update_cell_content(cell):
         cell["content"] = remove_data_source_function(cell["content"], list_ids, ["ODOO.LIST", "ODOO.LIST.HEADER"])
 
     def adapt_insert(cmd):
@@ -332,7 +266,7 @@ def remove_lists(spreadsheet: Spreadsheet, list_ids: List[str], insert_cmd_predi
             return Drop
         cmd["content"] = content
 
-    return (
+    return (lambda cell: update_cell_content(cell),), (
         CommandAdapter("INSERT_ODOO_LIST", adapt_insert),
         CommandAdapter("RE_INSERT_ODOO_LIST", adapt_re_insert),
         CommandAdapter("RENAME_ODOO_LIST", adapt_cmd_with_listId),
@@ -352,20 +286,19 @@ def remove_odoo_charts(spreadsheet: Spreadsheet, chart_ids: List[str], insert_cm
         if cmd["definition"]["type"].startswith("odoo_") and insert_cmd_predicate(chart):
             chart_ids.append(cmd["id"])
             return Drop
-        return cmd # not sure
+        return cmd  # not sure
 
     def adapt_chart_cmd_with_id(cmd):
         if cmd["id"] in chart_ids:
             return Drop
-        return cmd # not sure
-
+        return cmd  # not sure
 
     def adapt_global_filters(cmd):
         if cmd.get("chart"):
             for chart_id in chart_ids:
                 cmd["chart"].pop(chart_id, None)
 
-    return (
+    return (), (
         CommandAdapter("CREATE_CHART", adapt_create_chart),
         CommandAdapter("UPDATE_CHART", adapt_chart_cmd_with_id),
         CommandAdapter("DELETE_FIGURE", adapt_chart_cmd_with_id),

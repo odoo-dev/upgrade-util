@@ -6,27 +6,49 @@ from odoo.addons.base.maintenance.migrations import util
 
 def modify_all_models(cr, data):
     spreadsheet = Spreadsheet(data)
-    adapters = ()
+    cells_adapters = ()
+    revisions_adapters = ()
 
     to_remove = [model for model, new_model in util.ENVIRON["__renamed_models"].items() if not new_model]
     to_change = {old_model: new_model for old_model, new_model in util.ENVIRON["__renamed_models"].items() if new_model}
 
-    adapters += _remove_model_from_lists(to_remove, spreadsheet)
-    adapters += _remove_model_from_pivots(to_remove, spreadsheet)
-    adapters += _remove_model_from_charts(to_remove, spreadsheet)
-    adapters += _remove_model_from_filters(to_remove, spreadsheet)
-    adapters += _remove_model_from_view_link(to_remove, spreadsheet)
+    # remove
+    x, y = _remove_model_from_lists(to_remove, spreadsheet)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _remove_model_from_pivots(to_remove, spreadsheet)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _remove_model_from_charts(to_remove, spreadsheet)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _remove_model_from_filters(to_remove, spreadsheet)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _remove_model_from_view_link(to_remove, spreadsheet)
+    cells_adapters += x
+    revisions_adapters += y
 
     # rename
-    adapters += _rename_model_in_list(spreadsheet, to_change)
-    adapters += _rename_model_in_pivot(spreadsheet, to_change)
-    adapters += _rename_model_in_filters(spreadsheet, to_change)
-    adapters += _rename_model_in_charts(spreadsheet, to_change)
-    adapters += _rename_model_in_view_link(spreadsheet, to_change)
+    x, y = _rename_model_in_list(spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _rename_model_in_pivot(spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _rename_model_in_filters(spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _rename_model_in_charts(spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _rename_model_in_view_link(spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
 
     # spreadsheet.clean_empty_cells()  ## TODO do only once ...
 
-    return spreadsheet.data, adapters
+    return spreadsheet.data, cells_adapters, revisions_adapters
 
 
 def _rename_model_in_charts(spreadsheet: Spreadsheet, model_change):
@@ -40,7 +62,7 @@ def _rename_model_in_charts(spreadsheet: Spreadsheet, model_change):
             if new := model_change.get(chart.model, False):
                 chart.model = new
 
-    return (CommandAdapter("CREATE_CHART", adapt_insert),)
+    return (), (CommandAdapter("CREATE_CHART", adapt_insert),)
 
 
 def _rename_model_in_list(spreadsheet: Spreadsheet, model_change):
@@ -54,7 +76,7 @@ def _rename_model_in_list(spreadsheet: Spreadsheet, model_change):
         if new := model_change.get(olist.model, False):
             olist.model = new
 
-    return (CommandAdapter("INSERT_ODOO_LIST", adapt_insert),)
+    return (), (CommandAdapter("INSERT_ODOO_LIST", adapt_insert),)
 
 
 def _rename_model_in_pivot(spreadsheet: Spreadsheet, model_change):
@@ -67,7 +89,7 @@ def _rename_model_in_pivot(spreadsheet: Spreadsheet, model_change):
         if new := model_change.get(pivot.model, False):
             pivot.model = new
 
-    return (CommandAdapter("INSERT_PIVOT", adapt_insert),)
+    return (), (CommandAdapter("INSERT_PIVOT", adapt_insert),)
 
 
 def _rename_model_in_filters(spreadsheet: Spreadsheet, model_change):
@@ -82,7 +104,7 @@ def _rename_model_in_filters(spreadsheet: Spreadsheet, model_change):
     def adapt_insert(cmd):
         rename_relational_filter(cmd["filter"])
 
-    return (
+    return (), (
         CommandAdapter("ADD_GLOBAL_FILTER", adapt_insert),
         CommandAdapter("EDIT_GLOBAL_FILTER", adapt_insert),
     )
@@ -146,7 +168,7 @@ def _remove_model_from_filters(models, spreadsheet: Spreadsheet):
             return Drop
         return cmd
 
-    return (
+    return (), (
         CommandAdapter("ADD_GLOBAL_FILTER", adapt_add_filter),
         CommandAdapter("EDIT_GLOBAL_FILTER", adapt_edit_filter),
         CommandAdapter("REMOVE_GLOBAL_FILTER", adapt_remove_filter),

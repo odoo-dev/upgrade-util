@@ -27,7 +27,8 @@ def remove_adapter(leaf, is_or, negated):
 
 def modify_all_fields(cr, data):
     spreadsheet = Spreadsheet(data)
-    adapters = ()  # commandAdapter tuple
+    cells_adapters = ()
+    revisions_adapters = ()  # commandAdapter tuple
 
     to_remove = collections.defaultdict(list)
     to_change = collections.defaultdict(dict)
@@ -41,21 +42,39 @@ def modify_all_fields(cr, data):
 
     # remove
     _remove_field_from_filter_matching(cr, spreadsheet, to_remove)
-    adapters += _remove_field_from_list(cr, spreadsheet, to_remove)
-    adapters += _remove_field_from_pivot(cr, spreadsheet, to_remove)
-    adapters += _remove_field_from_graph(cr, spreadsheet, to_remove)
-    adapters += _remove_field_from_view_link(cr, spreadsheet, to_remove)
+    x, y = _remove_field_from_list(cr, spreadsheet, to_remove)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _remove_field_from_pivot(cr, spreadsheet, to_remove)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _remove_field_from_graph(cr, spreadsheet, to_remove)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _remove_field_from_view_link(cr, spreadsheet, to_remove)
+    cells_adapters += x
+    revisions_adapters += y
 
     # rename
-    adapters += _rename_field_in_list(cr, spreadsheet, to_change)
-    adapters += _rename_field_in_pivot(cr, spreadsheet, to_change)
-    adapters += _rename_field_in_chart(cr, spreadsheet, to_change)
-    adapters += _rename_field_in_filters(cr, spreadsheet, to_change)
-    adapters += _rename_field_in_view_link(cr, spreadsheet, to_change)
+    x, y = _rename_field_in_list(cr, spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _rename_field_in_pivot(cr, spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _rename_field_in_chart(cr, spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _rename_field_in_filters(cr, spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
+    x, y = _rename_field_in_view_link(cr, spreadsheet, to_change)
+    cells_adapters += x
+    revisions_adapters += y
 
-    spreadsheet.clean_empty_cells()  ## TODO remove, only do it once per data...
+    # spreadsheet.clean_empty_cells()  ## TODO remove, only do it once per data...
 
-    return spreadsheet.data, adapters
+    return spreadsheet.data, cells_adapters, revisions_adapters
 
 
 ## RENAME
@@ -102,7 +121,8 @@ def _rename_field_in_list(cr, spreadsheet: Spreadsheet, fields_changes):
                 content = _rename_function_fields(content, list_ids, {"ODOO.LIST", "ODOO.LIST.HEADER"}, old, new)
         return content
 
-    for cell in spreadsheet.cells:
+    # for cell in spreadsheet.cells:
+    def update_cell_content(cell):
         cell["content"] = trucmachin(cell["content"])
 
     list_models = {olist.id: olist.model for olist in spreadsheet.lists}
@@ -123,7 +143,7 @@ def _rename_field_in_list(cr, spreadsheet: Spreadsheet, fields_changes):
         else:
             return cmd
 
-    return (
+    return (lambda cell: update_cell_content(cell),), (
         CommandAdapter("INSERT_ODOO_LIST", collect_list),
         CommandAdapter("INSERT_ODOO_LIST", lambda cmd: rename(create_data_source_from_cmd(cmd))),
         CommandAdapter("RE_INSERT_ODOO_LIST", rename_re_insert),
@@ -176,7 +196,8 @@ def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, fields_changes):
                 content = _rename_function_fields(content, list_ids, {"ODOO.PIVOT", "ODOO.PIVOT.HEADER"}, old, new)
         return content
 
-    for cell in spreadsheet.cells:
+    # for cell in spreadsheet.cells:
+    def update_cell_content(cell):
         cell["content"] = trucmachin(cell["content"])
 
     pivot_models = {pivot.id: pivot.model for pivot in spreadsheet.pivots}
@@ -208,7 +229,7 @@ def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, fields_changes):
         else:
             return cmd
 
-    return (
+    return (lambda cell: update_cell_content(cell),), (
         CommandAdapter("INSERT_PIVOT", adapt_insert),
         CommandAdapter("RE_INSERT_PIVOT", adapt_pivot_table),
         CommandAdapter("UPDATE_CELL", modify_cmd_content),
@@ -254,7 +275,7 @@ def _rename_field_in_chart(cr, spreadsheet: Spreadsheet, fields_changes):
             chart = create_data_source_from_cmd(cmd)
             rename(chart)
 
-    return (CommandAdapter("CREATE_CHART", adapt_create_chart),)
+    return (), (CommandAdapter("CREATE_CHART", adapt_create_chart),)
 
 
 def _rename_field_in_filters(cr, spreadsheet: Spreadsheet, fields_changes):
@@ -287,7 +308,7 @@ def _rename_field_in_filters(cr, spreadsheet: Spreadsheet, fields_changes):
             chart = create_data_source_from_cmd(cmd)
             chart_models[chart.id] = chart.model
 
-    return (
+    return (), (
         CommandAdapter("INSERT_PIVOT", collect_pivot),
         CommandAdapter("INSERT_ODOO_LIST", collect_list),
         CommandAdapter("CREATE_CHART", collect_charts),
@@ -318,6 +339,7 @@ def _rename_field_in_view_link(cr, spreadsheet: Spreadsheet, fields_changes):
 
 
 ## Removal
+
 
 def _remove_data_source_field(cr, data_source, models):
     model = data_source.model
@@ -350,6 +372,7 @@ def _remove_list_functions(content, list_ids, field):  # .????
         return any(arg.value == field for arg in func_call_ast.args[1:])
 
     return remove_data_source_function(content, list_ids, {"ODOO.LIST", "ODOO.LIST.HEADER"}, filter_func)
+
 
 def _remove_field_from_list(cr, spreadsheet: Spreadsheet, models):
     def _remove_field(olist):
@@ -387,7 +410,7 @@ def _remove_field_from_list(cr, spreadsheet: Spreadsheet, models):
             print(olist.id)
             print(list_models)
 
-    return (
+    return (), (
         CommandAdapter("INSERT_ODOO_LIST", collect_list),
         CommandAdapter("INSERT_ODOO_LIST", adapt_insert),
         CommandAdapter("RE_INSERT_ODOO_LIST", adapt_re_insert),
@@ -409,14 +432,13 @@ def _remove_field_from_pivot(cr, spreadsheet: Spreadsheet, models):
         pivot = create_data_source_from_cmd(cmd)
         _remove_field(pivot)
 
-    return (
+    return (), (
         CommandAdapter("INSERT_PIVOT", adapt_insert),
         CommandAdapter("RE_INSERT_PIVOT", adapt_insert),
         # CommandAdapter("RE_INSERT_PIVOT", adapt_insert),
     )
     ## missing update pivot // ADD PIVOT etc
-    ## will probably need to vberion the removefield stuff 
-
+    ## will probably need to vberion the removefield stuff
 
 
 def _remove_field_from_graph(cr, spreadsheet: Spreadsheet, models):
@@ -433,7 +455,7 @@ def _remove_field_from_graph(cr, spreadsheet: Spreadsheet, models):
             chart = create_data_source_from_cmd(cmd)
             _remove_field(chart)
 
-    return (CommandAdapter("CREATE_CHART", adapt_create_chart),)
+    return (), (CommandAdapter("CREATE_CHART", adapt_create_chart),)
 
 
 def _remove_field_from_view_link(cr, spreadsheet: Spreadsheet, models):

@@ -1,9 +1,8 @@
 import json
 from typing import Iterable, List, Union
 
-from odoo.upgrade.util.misc import version_gte
-
 from .o_spreadsheet import load
+from odoo.upgrade.util.misc import version_gte
 
 """This file provides (partial) wrappers for reading and writing spreadsheet data
 and commands.
