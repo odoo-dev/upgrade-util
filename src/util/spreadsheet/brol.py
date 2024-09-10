@@ -102,21 +102,6 @@ def update_spreadsheet(dbname, res_model, res_id, attachment_id, update_revision
             _update_json(cr, attachment_id, db_datas)
 
 
-def update_document(dbname, doc_id, attachment_id):
-    cursor = db_connect(dbname).cursor
-    with cursor() as cr:
-        cr.execute(
-            """
-            SELECT db_datas from ir_attachment
-            WHERE id=%s
-        """,
-            [attachment_id],
-        )
-        db_datas = cr.fetchone()[0]
-        all_adapters = _update_json(cr, attachment_id, db_datas)
-        _update_revisions(cr, "documents.document", doc_id, *all_adapters)
-
-
 def update_documents(cr, brol):
     if util.table_exists(cr, "documents_document"):
         with ProcessPoolExecutor() as executor:
@@ -127,21 +112,6 @@ def update_documents(cr, brol):
                  WHERE doc.handler='spreadsheet'
                 """)
             executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("documents.document"), *zip(*cr.fetchall()))
-
-
-def update_dashboard(dbname, dashboard_id, attachment_id):
-    cursor = db_connect(dbname).cursor
-    with cursor() as cr:
-        cr.execute(
-            """
-            SELECT db_datas from ir_attachment
-            WHERE id=%s
-        """,
-            [attachment_id],
-        )
-        db_datas = cr.fetchone()[0]
-        all_adapters = _update_json(cr, attachment_id, db_datas)
-        _update_revisions(cr, "spreadshet.dashboard", dashboard_id, *all_adapters)
 
 def update_dashboards(cr, brol):
     if util.table_exists(cr, "spreadsheet_dashboard"):
@@ -157,23 +127,7 @@ def update_dashboards(cr, brol):
                 """,
                 [data_field],
             )
-            executor.map(brol.update_dashboard, repeat(cr.dbname), *zip(*cr.fetchall()))
-
-
-def update_template(dbname, template_id, attachment_id):
-    # TODO pass to update_spreadsheet
-    cursor = db_connect(dbname).cursor
-    with cursor() as cr:
-        cr.execute(
-            """
-            SELECT db_datas from ir_attachment
-            WHERE id=%s
-        """,
-            [attachment_id],
-        )
-        db_datas = cr.fetchone()[0]
-        all_adapters = _update_json(cr, attachment_id, db_datas)
-        _update_revisions(cr, "documents.template", template_id, *all_adapters)
+            executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.dashboard"), *zip(*cr.fetchall()))
 
 
 def update_templates(cr, brol):
@@ -181,13 +135,13 @@ def update_templates(cr, brol):
         with ProcessPoolExecutor() as executor:
             cr.execute(
                 """
-                SELECT res_id, id, db_datas
+                SELECT res_id, id
                 FROM ir_attachment
                 WHERE res_model = 'spreadsheet.template'
                 AND res_field = 'data'
                 """,
             )
-            executor.map(brol.update_template, repeat(cr.dbname), *zip(*cr.fetchall()))
+            executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.template"), *zip(*cr.fetchall()))
 
 
 def update_snapshots(cr, brol):
