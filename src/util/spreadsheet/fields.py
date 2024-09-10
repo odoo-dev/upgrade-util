@@ -389,10 +389,6 @@ def _remove_field_from_list(cr, spreadsheet: Spreadsheet, models):
 
     def collect_list(cmd):
         olist = create_data_source_from_cmd(cmd)
-        print("collecting list?\n" * 20)
-        print(cmd)
-        print(olist.id)
-        print(list_models)
         list_models[olist.id] = olist.model
 
     def adapt_insert(cmd):
@@ -400,15 +396,10 @@ def _remove_field_from_list(cr, spreadsheet: Spreadsheet, models):
         _remove_field(olist)
 
     def adapt_re_insert(cmd):
-        try:
-            olist = create_data_source_from_cmd(cmd)
-            if models.get(list_models[olist.id], False):
-                _remove_field(olist)
-        except:
-            print("oups cassé\n" * 20)
-            print(cmd)
-            print(olist.id)
-            print(list_models)
+        olist = create_data_source_from_cmd(cmd)
+        if models.get(list_models[olist.id], False):
+            _remove_field(olist)
+
 
     return (), (
         CommandAdapter("INSERT_ODOO_LIST", collect_list),

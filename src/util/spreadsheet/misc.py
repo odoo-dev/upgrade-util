@@ -100,6 +100,7 @@ def write_attachment(cr, attachment_id, data):
 
 
 def upgrade_data(cr, upgrade_callback):
+    # TODO: paralellize this
     start = time.time()
     for attachment_id, _res_model, _res_id, data in read_spreadsheet_attachments(cr):
         upgraded_data = upgrade_callback(load(data))
