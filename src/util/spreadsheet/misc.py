@@ -40,7 +40,7 @@ def read_spreadsheet_snapshots(cr, like_pattern=""):
             yield attachment_id, res_model, res_id, orjson.loads(db_datas.tobytes())
 
 
-def read_spreadsheet_initial_data(cr, like_pattern=""):
+def read_spreadsheet_initial_data(cr):
     if util.table_exists(cr, "documents_document"):
         cr.execute(
             """
@@ -48,14 +48,14 @@ def read_spreadsheet_initial_data(cr, like_pattern=""):
               FROM documents_document doc
          LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
              WHERE doc.handler='spreadsheet'
-               AND position(%s::bytea in db_datas) > 0
             """,
-            [like_pattern],
         )
         # TODO there are excel files in there!
         for document_id, attachment_id, db_datas in cr.fetchall():
             if db_datas:
                 yield attachment_id, "documents.document", document_id, orjson.loads(db_datas.tobytes())
+
+        # TODO add spreadsheet.templates here as well
 
     if util.table_exists(cr, "spreadsheet_dashboard"):
         data_field = _magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
@@ -65,9 +65,8 @@ def read_spreadsheet_initial_data(cr, like_pattern=""):
             FROM ir_attachment
             WHERE res_model = 'spreadsheet.dashboard'
             AND res_field = %s
-            AND position(%s::bytea in db_datas) > 0
             """,
-            [data_field, like_pattern],
+            [data_field],
         )
         for attachment_id, res_model, res_id, db_datas in cr.fetchall():
             if db_datas:
@@ -97,22 +96,6 @@ def write_attachment(cr, attachment_id, data):
         """,
         [orjson.dumps(data, option=orjson.OPT_NON_STR_KEYS), attachment_id],
     )
-
-
-def upgrade_data(cr, upgrade_callback):
-    # TODO: paralellize this
-    start = time.time()
-    for attachment_id, _res_model, _res_id, data in read_spreadsheet_attachments(cr):
-        upgraded_data = upgrade_callback(load(data))
-        cr.execute(
-            """
-            UPDATE ir_attachment
-                SET db_datas=%s
-                WHERE id=%s
-            """,
-            [orjson.dumps(upgraded_data, option=orjson.OPT_NON_STR_KEYS), attachment_id],
-        )
-    _logger.info("spreadsheet json data upgraded in %s seconds" % (time.time() - start))
 
 
 def transform_data_source_functions(content, data_source_ids, functions, adapter):

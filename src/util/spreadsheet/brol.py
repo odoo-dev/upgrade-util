@@ -115,7 +115,6 @@ def update_documents(cr, brol):
 
 def update_dashboards(cr, brol):
     if util.table_exists(cr, "spreadsheet_dashboard"):
-        #TODO pass to update_spreadsheet
         data_field = spreadsheet.misc._magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
         with ProcessPoolExecutor() as executor:
             cr.execute(
@@ -151,9 +150,102 @@ def update_snapshots(cr, brol):
             FROM ir_attachment
             WHERE res_field = 'spreadsheet_snapshot'
         """)
-        executor.map(brol.update_spreadsheet, repeat(cr.dbname),repeat("unimportant"), repeat(0), *zip(*cr.fetchall()), repeat(False))
+        executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("unimportant"), repeat(0), *zip(*cr.fetchall()), repeat(False))
 
 
 def apply_cells_adapters(cell, *adapters):
     for adapter in adapters:
         adapter(cell)
+
+
+def upgrade_attachment_data(dbname, attachment_id, upgrade_callback):
+    cursor = db_connect(dbname).cursor
+    with cursor() as cr:
+        try:
+            cr.execute(
+                """
+                SELECT db_datas from ir_attachment
+                WHERE id=%s
+            """,
+                [attachment_id],
+            )
+            db_datas = cr.fetchone()[0]
+            upgraded_data = upgrade_callback(spreadsheet.misc.load(data))
+
+            cr.execute(
+                """
+                UPDATE ir_attachment
+                    SET db_datas=%s
+                    WHERE id=%s
+                """,
+                [orjson.dumps(upgraded_data, option=orjson.OPT_NON_STR_KEYS), attachment_id],
+            )
+        except Exception as e:
+            _logger.error("c'est cassé cheh, %s" % str(e))
+            raise e
+
+
+def upgrade_documents(cr, brol, upgrade_callback):
+    if util.table_exists(cr, "documents_document"):
+        with ProcessPoolExecutor() as executor:
+            cr.execute(r"""
+                SELECT doc.id AS document_id, a.id AS attachment_id
+                  FROM documents_document doc
+             LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
+                 WHERE doc.handler='spreadsheet'
+                """)
+            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+
+def upgrade_dashboards(cr, brol, upgrade_callback):
+    if util.table_exists(cr, "spreadsheet_dashboard"):
+        data_field = spreadsheet.misc._magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
+        with ProcessPoolExecutor() as executor:
+            cr.execute(r"""
+                SELECT res_id, id
+                  FROM ir_attachment
+                 WHERE res_model = 'spreadsheet.dashboard'
+                   AND res_field = %s
+                """,
+                [data_field],
+            )
+            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+
+
+def upgrade_templates(cr, brol, upgrade_callback):
+    if util.table_exists(cr, "spreadsheet_template"):
+        with ProcessPoolExecutor() as executor:
+            cr.execute("""
+                SELECT res_id, id
+                  FROM ir_attachment
+                 WHERE res_model = 'spreadsheet.template'
+                   AND res_field = 'data'
+                """)
+            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+
+def upgrade_snapshots(cr, brol, upgrade_callback):
+    if util.table_exists(cr, "spreadsheet_template"):
+        with ProcessPoolExecutor() as executor:
+            cr.execute(r"""
+            SELECT id
+            FROM ir_attachment
+            WHERE res_field = 'spreadsheet_snapshot'
+            """)
+            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+
+def upgrade_data(cr, upgrade_callback):
+    # NOTE
+    # `ProcessPoolExecutor.map` arguments needs to be pickleable
+    # Functions can only be pickle if they are importable.
+    # However, the current file is not importable due to the dash in the filename.
+    # We should then put the executed function in its own importable file.
+    name = f"_upgrade_{uuid.uuid4().hex}"
+    # TODO need to make it relative OFC
+    file_path = "/home/kelddun/rar-workspace/upgrade-util/src/util/spreadsheet/brol.py"
+    brol = sys.modules[name] = util.import_script(file_path, name=name)
+
+    start = time.time()
+    upgrade_documents(cr, brol, upgrade_callback)
+    upgrade_dashboards(cr, brol, upgrade_callback)
+    upgrade_templates(cr, brol,upgrade_callback)
+    upgrade_snapshots(cr, brol, upgrade_callback)
+    _logger.info("spreadsheet json data upgraded in %s seconds" % (time.time() - start))

@@ -186,19 +186,19 @@ def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, fields_changes):
     for pivot in spreadsheet.pivots:
         rename(pivot)
 
-    def trucmachin(content):
+    def trucmachinList(content):
         for model in pivot_ids_per_model:
             list_ids = pivot_ids_per_model[model]
             for old, new in fields_changes[model].items():
                 # TODORAR change function defition as we apply
                 # this after the migration of revision,
-                # so right now, odoo.?pivot no longer exists ....
+                # so right now, odoo.pivot no longer exists ....
                 content = _rename_function_fields(content, list_ids, {"ODOO.PIVOT", "ODOO.PIVOT.HEADER"}, old, new)
         return content
 
     # for cell in spreadsheet.cells:
     def update_cell_content(cell):
-        cell["content"] = trucmachin(cell["content"])
+        cell["content"] = trucmachinList(cell["content"])
 
     pivot_models = {pivot.id: pivot.model for pivot in spreadsheet.pivots}
 
@@ -225,7 +225,7 @@ def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, fields_changes):
 
     def modify_cmd_content(cmd):
         if "content" in cmd:
-            return dict(cmd, content=trucmachin(cmd.get("content")))
+            return dict(cmd, content=trucmachinList(cmd.get("content")))
         else:
             return cmd
 
