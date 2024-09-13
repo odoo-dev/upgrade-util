@@ -185,52 +185,48 @@ def upgrade_attachment_data(dbname, attachment_id, upgrade_callback):
             raise e
 
 
-def upgrade_documents(cr, brol, upgrade_callback):
+def upgrade_documents(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "documents_document"):
-        with ProcessPoolExecutor() as executor:
-            cr.execute(r"""
-                SELECT doc.id AS document_id, a.id AS attachment_id
-                  FROM documents_document doc
-             LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
-                 WHERE doc.handler='spreadsheet'
-                """)
-            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+        cr.execute(r"""
+            SELECT doc.id AS document_id, a.id AS attachment_id
+                FROM documents_document doc
+            LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
+                WHERE doc.handler='spreadsheet'
+            """)
+        return list(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback)))
 
-def upgrade_dashboards(cr, brol, upgrade_callback):
+def upgrade_dashboards(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_dashboard"):
         data_field = spreadsheet.misc._magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
-        with ProcessPoolExecutor() as executor:
-            cr.execute(r"""
-                SELECT res_id, id
-                  FROM ir_attachment
-                 WHERE res_model = 'spreadsheet.dashboard'
-                   AND res_field = %s
-                """,
-                [data_field],
-            )
-            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+        cr.execute(r"""
+            SELECT res_id, id
+                FROM ir_attachment
+                WHERE res_model = 'spreadsheet.dashboard'
+                AND res_field = %s
+            """,
+            [data_field],
+        )
+        return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
 
 
-def upgrade_templates(cr, brol, upgrade_callback):
+def upgrade_templates(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_template"):
-        with ProcessPoolExecutor() as executor:
-            cr.execute("""
-                SELECT res_id, id
-                  FROM ir_attachment
-                 WHERE res_model = 'spreadsheet.template'
-                   AND res_field = 'data'
-                """)
-            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
-
-def upgrade_snapshots(cr, brol, upgrade_callback):
-    if util.table_exists(cr, "spreadsheet_template"):
-        with ProcessPoolExecutor() as executor:
-            cr.execute(r"""
-            SELECT id
-            FROM ir_attachment
-            WHERE res_field = 'spreadsheet_snapshot'
+        cr.execute("""
+            SELECT res_id, id
+                FROM ir_attachment
+                WHERE res_model = 'spreadsheet.template'
+                AND res_field = 'data'
             """)
-            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+        return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+
+def upgrade_snapshots(cr, brol, upgrade_callback, executor):
+    if util.table_exists(cr, "spreadsheet_template"):
+        cr.execute(r"""
+        SELECT id
+        FROM ir_attachment
+        WHERE res_field = 'spreadsheet_snapshot'
+        """)
+        return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
 
 def upgrade_data(cr, upgrade_callback):
     # NOTE
@@ -242,10 +238,8 @@ def upgrade_data(cr, upgrade_callback):
     # TODO need to make it relative OFC
     file_path = "/home/kelddun/rar-workspace/upgrade-util/src/util/spreadsheet/brol.py"
     brol = sys.modules[name] = util.import_script(file_path, name=name)
-
-    start = time.time()
-    upgrade_documents(cr, brol, upgrade_callback)
-    upgrade_dashboards(cr, brol, upgrade_callback)
-    upgrade_templates(cr, brol,upgrade_callback)
-    upgrade_snapshots(cr, brol, upgrade_callback)
-    _logger.info("spreadsheet json data upgraded in %s seconds" % (time.time() - start))
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        upgrade_documents(cr, brol, upgrade_callback, executor)
+        upgrade_dashboards(cr, brol, upgrade_callback , executor)
+        upgrade_templates(cr, brol,upgrade_callback, executor)
+        upgrade_snapshots(cr, brol, upgrade_callback, executor)
