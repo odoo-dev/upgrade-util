@@ -158,7 +158,7 @@ def apply_cells_adapters(cell, *adapters):
         adapter(cell)
 
 
-def upgrade_attachment_data(dbname, attachment_id, upgrade_callback):
+def upgrade_attachment_data(dbname, poubelle_id, attachment_id, upgrade_callback):
     cursor = db_connect(dbname).cursor
     with cursor() as cr:
         try:
@@ -170,6 +170,7 @@ def upgrade_attachment_data(dbname, attachment_id, upgrade_callback):
                 [attachment_id],
             )
             db_datas = cr.fetchone()[0]
+            data = orjson.loads(db_datas.tobytes())
             upgraded_data = upgrade_callback(spreadsheet.misc.load(data))
 
             cr.execute(
@@ -193,7 +194,7 @@ def upgrade_documents(cr, brol, upgrade_callback, executor):
             LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
                 WHERE doc.handler='spreadsheet'
             """)
-        executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+        list(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback)))
 
 def upgrade_dashboards(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_dashboard"):
