@@ -111,7 +111,7 @@ def update_documents(cr, brol):
              LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
                  WHERE doc.handler='spreadsheet'
                 """)
-            executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("documents.document"), *zip(*cr.fetchall()))
+            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("documents.document"), *zip(*cr.fetchall())))
 
 def update_dashboards(cr, brol):
     if util.table_exists(cr, "spreadsheet_dashboard"):
@@ -193,7 +193,7 @@ def upgrade_documents(cr, brol, upgrade_callback, executor):
             LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
                 WHERE doc.handler='spreadsheet'
             """)
-        return list(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback)))
+        executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
 
 def upgrade_dashboards(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_dashboard"):
