@@ -89,18 +89,47 @@ def update_spreadsheet(dbname, res_model, res_id, attachment_id, update_revision
     with cursor() as cr:
         cr.execute(
             """
-            SELECT db_datas from ir_attachment
+            SELECT db_datas FROM ir_attachment
             WHERE id=%s
         """,
             [attachment_id],
         )
         db_datas = cr.fetchone()[0]
+        if not db_datas:
+            print("naaaaa\n"*20)
+            print(dbname, res_model, res_id, attachment_id)
+        else: 
+            print("cool works\n"*5)
+            print(dbname, res_model, res_id, attachment_id)
+            print(len(db_datas))
         if update_revisions:
             all_adapters = _update_json(cr, attachment_id, db_datas)
             _update_revisions(cr, res_model, res_id, *all_adapters)
         else:
             _update_json(cr, attachment_id, db_datas)
+        cr.commit()
 
+
+def update_spreadsheet_caca(dbname, res_model, res_id, attachment_id):
+    cursor = db_connect(dbname).cursor
+    with cursor() as cr:
+        cr.execute(
+            """
+            SELECT db_datas FROM ir_attachment
+            WHERE id=%s
+        """,
+            [attachment_id],
+        )
+        db_datas = cr.fetchone()[0]
+        if not db_datas:
+            print("naaaaa\n"*20)
+            print(dbname, res_model, res_id, attachment_id)
+        else: 
+            print("cool works\n"*5)
+            print(dbname, res_model, res_id, attachment_id)
+            print(len(db_datas))
+        _update_json(cr, attachment_id, db_datas)
+        cr.commit();
 
 def update_documents(cr, brol):
     if util.table_exists(cr, "documents_document"):
@@ -110,6 +139,7 @@ def update_documents(cr, brol):
                   FROM documents_document doc
              LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
                  WHERE doc.handler='spreadsheet'
+                AND db_datas IS NOT null
                 """)
             list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("documents.document"), *zip(*cr.fetchall())))
 
@@ -123,10 +153,11 @@ def update_dashboards(cr, brol):
                 FROM ir_attachment
                 WHERE res_model = 'spreadsheet.dashboard'
                 AND res_field = %s
+                AND db_datas IS NOT null
                 """,
                 [data_field],
             )
-            executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.dashboard"), *zip(*cr.fetchall()))
+            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.dashboard"), *zip(*cr.fetchall())))
 
 
 def update_templates(cr, brol):
@@ -138,19 +169,21 @@ def update_templates(cr, brol):
                 FROM ir_attachment
                 WHERE res_model = 'spreadsheet.template'
                 AND res_field = 'data'
+                AND db_datas IS NOT null
                 """,
             )
-            executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.template"), *zip(*cr.fetchall()))
+            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.template"), *zip(*cr.fetchall())))
 
 
 def update_snapshots(cr, brol):
     with ProcessPoolExecutor() as executor:
         cr.execute(r"""
-        SELECT id
+            SELECT res_id, id
             FROM ir_attachment
             WHERE res_field = 'spreadsheet_snapshot'
+            AND db_datas IS NOT null
         """)
-        executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("unimportant"), repeat(0), *zip(*cr.fetchall()), repeat(False))
+        list(executor.map(brol.update_spreadsheet_caca, repeat(cr.dbname), repeat("unimportant"), *zip(*cr.fetchall())))
 
 
 def apply_cells_adapters(cell, *adapters):
@@ -162,6 +195,10 @@ def upgrade_attachment_data(dbname, poubelle_id, attachment_id, upgrade_callback
     cursor = db_connect(dbname).cursor
     with cursor() as cr:
         try:
+            if not attachment_id:
+                print("PUTAIN \n" *2)
+                print(dbname, str(poubelle_id), str(attachment_id), str(upgrade_callback))
+
             cr.execute(
                 """
                 SELECT db_datas from ir_attachment
@@ -194,7 +231,7 @@ def upgrade_documents(cr, brol, upgrade_callback, executor):
             LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
                 WHERE doc.handler='spreadsheet'
             """)
-        list(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback)))
+        return list(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback)))
 
 def upgrade_dashboards(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_dashboard"):
@@ -212,20 +249,25 @@ def upgrade_dashboards(cr, brol, upgrade_callback, executor):
 
 def upgrade_templates(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_template"):
+        data_field = spreadsheet.misc._magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
         cr.execute("""
             SELECT res_id, id
                 FROM ir_attachment
                 WHERE res_model = 'spreadsheet.template'
-                AND res_field = 'data'
-            """)
+                AND res_field = %s
+                AND db_datas IS NOT null
+            """,
+            [data_field],
+        )
         return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
 
 def upgrade_snapshots(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_template"):
         cr.execute(r"""
-        SELECT id
+        SELECT 'snapshot', id
         FROM ir_attachment
         WHERE res_field = 'spreadsheet_snapshot'
+        AND db_datas IS NOT null
         """)
         return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
 
@@ -241,6 +283,6 @@ def upgrade_data(cr, upgrade_callback):
     brol = sys.modules[name] = util.import_script(file_path, name=name)
     with ProcessPoolExecutor(max_workers=4) as executor:
         upgrade_documents(cr, brol, upgrade_callback, executor)
-        upgrade_dashboards(cr, brol, upgrade_callback , executor)
-        upgrade_templates(cr, brol,upgrade_callback, executor)
-        upgrade_snapshots(cr, brol, upgrade_callback, executor)
+        # upgrade_dashboards(cr, brol, upgrade_callback , executor)
+        # upgrade_templates(cr, brol,upgrade_callback, executor)
+        # upgrade_snapshots(cr, brol, upgrade_callback, executor)
