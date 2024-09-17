@@ -56,7 +56,6 @@ def _update_json(cr, attachment_id, db_datas):
         # designeds to change in place ?
         apply_cells_adapters(cell, *cells_adapters)
 
-
     spreadsheetObj.clean_empty_cells()
     data = spreadsheetObj.data  # looks like a bad use of resource to recast all the fn time and useless??
 
@@ -102,7 +101,7 @@ def update_spreadsheet(dbname, res_model, res_id, attachment_id, update_revision
             else:
                 _update_json(cr, attachment_id, db_datas)
         except Exception as e:
-            print("update post est ptééééé\n" *20)
+            print("update post est ptééééé\n" * 20)
             _logger.error("c'est cassé cheh, %s" % str(e))
 
 
@@ -116,11 +115,18 @@ def update_documents(cr, brol):
                  WHERE doc.handler='spreadsheet'
                 AND db_datas IS NOT null
                 """)
-            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("documents.document"), *   zip(*cr.fetchall())))
+            list(
+                executor.map(
+                    brol.update_spreadsheet, repeat(cr.dbname), repeat("documents.document"), *zip(*cr.fetchall())
+                )
+            )
+
 
 def update_dashboards(cr, brol):
     if util.table_exists(cr, "spreadsheet_dashboard"):
-        data_field = spreadsheet.misc._magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
+        data_field = spreadsheet.misc._magic_spreadsheet_field(
+            cr
+        )  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
         with ProcessPoolExecutor() as executor:
             cr.execute(
                 """
@@ -135,7 +141,9 @@ def update_dashboards(cr, brol):
             result = cr.fetchall()
             if not len(result):
                 return
-            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.dashboard"), *zip(*result)))
+            list(
+                executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.dashboard"), *zip(*result))
+            )
 
 
 def update_templates(cr, brol):
@@ -153,7 +161,9 @@ def update_templates(cr, brol):
             result = cr.fetchall()
             if not len(result):
                 return
-            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.template"), *zip(*result)))
+            list(
+                executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.template"), *zip(*result))
+            )
 
 
 def update_snapshots(cr, brol):
@@ -167,7 +177,11 @@ def update_snapshots(cr, brol):
         result = cr.fetchall()
         if not len(result):
             return
-        list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("unimportant"), *zip(*result), repeat(False)))  # noqa: FBT003
+        list(
+            executor.map(
+                brol.update_spreadsheet, repeat(cr.dbname), repeat("unimportant"), *zip(*result), repeat(False)
+            )
+        )  # noqa: FBT003
 
 
 def apply_cells_adapters(cell, *adapters):
@@ -180,7 +194,7 @@ def upgrade_attachment_data(dbname, poubelle_id, attachment_id, upgrade_callback
     with cursor() as cr:
         try:
             if not attachment_id:
-                print("PUTAIN \n" *2)
+                print("PUTAIN \n" * 2)
                 print(dbname, str(poubelle_id), str(attachment_id), str(upgrade_callback))
 
             cr.execute(
@@ -203,6 +217,7 @@ def upgrade_attachment_data(dbname, poubelle_id, attachment_id, upgrade_callback
                 [orjson.dumps(upgraded_data, option=orjson.OPT_NON_STR_KEYS), attachment_id],
             )
         except Exception as e:
+            print(dbname, poubelle_id, attachment_id)
             _logger.error("c'est cassé cheh, %s" % str(e))
             raise e
 
@@ -215,13 +230,22 @@ def upgrade_documents(cr, brol, upgrade_callback, executor):
             LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
                 WHERE doc.handler='spreadsheet'
             """)
-        return list(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback)))
+        result = cr.fetchall()
+        if not len(result):
+            return
+        return list(
+            executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*result), repeat(upgrade_callback))
+        )
     return None
+
 
 def upgrade_dashboards(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_dashboard"):
-        data_field = spreadsheet.misc._magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
-        cr.execute(r"""
+        data_field = spreadsheet.misc._magic_spreadsheet_field(
+            cr
+        )  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
+        cr.execute(
+            r"""
             SELECT res_id, id
                 FROM ir_attachment
                 WHERE res_model = 'spreadsheet.dashboard'
@@ -229,14 +253,22 @@ def upgrade_dashboards(cr, brol, upgrade_callback, executor):
             """,
             [data_field],
         )
-        return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+        result = cr.fetchall()
+        if not len(result):
+            return
+        return list(executor.map(
+            brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*result), repeat(upgrade_callback)
+        ))
     return None
 
 
 def upgrade_templates(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_template"):
-        data_field = spreadsheet.misc._magic_spreadsheet_field(cr)  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
-        cr.execute("""
+        data_field = spreadsheet.misc._magic_spreadsheet_field(
+            cr
+        )  # "spreadsheet_binary_data" if version_gte("saas~16.3") else "data"
+        cr.execute(
+            """
             SELECT res_id, id
                 FROM ir_attachment
                 WHERE res_model = 'spreadsheet.template'
@@ -245,8 +277,15 @@ def upgrade_templates(cr, brol, upgrade_callback, executor):
             """,
             [data_field],
         )
-        return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+        result = cr.fetchall()
+        if not len(result):
+            return
+        # for res_id, attach_id in result:
+        #     brol.upgrade_attachment_data(cr.dbname, res_id, attach_id, upgrade_callback)  # noqa: ERA001
+        return list(util.log_progress(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*result), repeat(upgrade_callback)), _logger, size=len(result)))
+        # return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*result), repeat(upgrade_callback))
     return None
+
 
 def upgrade_snapshots(cr, brol, upgrade_callback, executor):
     if util.table_exists(cr, "spreadsheet_template"):
@@ -256,8 +295,14 @@ def upgrade_snapshots(cr, brol, upgrade_callback, executor):
              WHERE res_field = 'spreadsheet_snapshot'
                AND db_datas IS NOT null
             """)
-        return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*cr.fetchall()), repeat(upgrade_callback))
+        result = cr.fetchall()
+        if not len(result):
+            return
+        # for res_id, attach_id in result:
+        return list(util.log_progress(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*result), repeat(upgrade_callback)), _logger, size=len(result)))
     return None
+
+
 
 def upgrade_data(cr, upgrade_callback):
     # NOTE
@@ -271,6 +316,6 @@ def upgrade_data(cr, upgrade_callback):
     brol = sys.modules[name] = util.import_script(file_path, name=name)
     with ProcessPoolExecutor(max_workers=4) as executor:
         upgrade_documents(cr, brol, upgrade_callback, executor)
-        upgrade_dashboards(cr, brol, upgrade_callback , executor)
-        upgrade_templates(cr, brol,upgrade_callback, executor)
+        upgrade_dashboards(cr, brol, upgrade_callback, executor)
+        upgrade_templates(cr, brol, upgrade_callback, executor)
         upgrade_snapshots(cr, brol, upgrade_callback, executor)
