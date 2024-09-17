@@ -28,7 +28,7 @@ def update_spreadsheets_table_changes(cr):
     update_documents(cr, brol)
     update_dashboards(cr, brol)
     update_templates(cr, brol)
-    update_snapshots(cr, brol)
+    # update_snapshots(cr, brol)
 
 
 def get_revisions(cr, res_model, res_id):
@@ -87,26 +87,30 @@ def _update_revisions(cr, res_model, res_id, *adapters):
 def update_spreadsheet(dbname, res_model, res_id, attachment_id, update_revisions=True):
     cursor = db_connect(dbname).cursor
     with cursor() as cr:
-        cr.execute(
-            """
-            SELECT db_datas FROM ir_attachment
-            WHERE id=%s
-        """,
-            [attachment_id],
-        )
-        db_datas = cr.fetchone()[0]
-        if not db_datas:
-            print("naaaaa\n"*20)
-            print(dbname, res_model, res_id, attachment_id)
-        else: 
-            print("cool works\n"*5)
-            print(dbname, res_model, res_id, attachment_id)
-            print(len(db_datas))
-        if update_revisions:
-            all_adapters = _update_json(cr, attachment_id, db_datas)
-            _update_revisions(cr, res_model, res_id, *all_adapters)
-        else:
-            _update_json(cr, attachment_id, db_datas)
+        try:
+            cr.execute(
+                """
+                SELECT db_datas FROM ir_attachment
+                WHERE id=%s
+            """,
+                [attachment_id],
+            )
+            db_datas = cr.fetchone()[0]
+            if not db_datas:
+                print("naaaaa\n"*20)
+                print(dbname, res_model, res_id, attachment_id)
+            else: 
+                print("cool works\n"*5)
+                print(dbname, res_model, res_id, attachment_id)
+                print(len(db_datas))
+            if update_revisions:
+                all_adapters = _update_json(cr, attachment_id, db_datas)
+                _update_revisions(cr, res_model, res_id, *all_adapters)
+            else:
+                _update_json(cr, attachment_id, db_datas)
+        except Exception as e:
+            print("update post est ptééééé\n" *20)
+            _logger.error("c'est cassé cheh, %s" % str(e))
         cr.commit()
 
 
@@ -141,7 +145,7 @@ def update_documents(cr, brol):
                  WHERE doc.handler='spreadsheet'
                 AND db_datas IS NOT null
                 """)
-            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("documents.document"), *zip(*cr.fetchall())))
+            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("documents.document"), *   zip(*cr.fetchall())))
 
 def update_dashboards(cr, brol):
     if util.table_exists(cr, "spreadsheet_dashboard"):
@@ -157,7 +161,10 @@ def update_dashboards(cr, brol):
                 """,
                 [data_field],
             )
-            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.dashboard"), *zip(*cr.fetchall())))
+            result = cr.fetchall()
+            if not len(result):
+                return
+            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.dashboard"), *zip(*result)))
 
 
 def update_templates(cr, brol):
@@ -172,7 +179,10 @@ def update_templates(cr, brol):
                 AND db_datas IS NOT null
                 """,
             )
-            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.template"), *zip(*cr.fetchall())))
+            result = cr.fetchall()
+            if not len(result):
+                return
+            list(executor.map(brol.update_spreadsheet, repeat(cr.dbname), repeat("spreadsheet.template"), *zip(*result)))
 
 
 def update_snapshots(cr, brol):
@@ -183,7 +193,10 @@ def update_snapshots(cr, brol):
             WHERE res_field = 'spreadsheet_snapshot'
             AND db_datas IS NOT null
         """)
-        list(executor.map(brol.update_spreadsheet_caca, repeat(cr.dbname), repeat("unimportant"), *zip(*cr.fetchall())))
+        result = cr.fetchall()
+        if not len(result):
+            return
+        list(executor.map(brol.update_spreadsheet_caca, repeat(cr.dbname), repeat("unimportant"), *zip(*result)))
 
 
 def apply_cells_adapters(cell, *adapters):
