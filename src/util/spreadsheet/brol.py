@@ -193,10 +193,6 @@ def upgrade_attachment_data(dbname, poubelle_id, attachment_id, upgrade_callback
     cursor = db_connect(dbname).cursor
     with cursor() as cr:
         try:
-            if not attachment_id:
-                print("PUTAIN \n" * 2)
-                print(dbname, str(poubelle_id), str(attachment_id), str(upgrade_callback))
-
             cr.execute(
                 """
                 SELECT db_datas from ir_attachment
@@ -280,10 +276,7 @@ def upgrade_templates(cr, brol, upgrade_callback, executor):
         result = cr.fetchall()
         if not len(result):
             return
-        # for res_id, attach_id in result:
-        #     brol.upgrade_attachment_data(cr.dbname, res_id, attach_id, upgrade_callback)  # noqa: ERA001
         return list(util.log_progress(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*result), repeat(upgrade_callback)), _logger, size=len(result)))
-        # return executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*result), repeat(upgrade_callback))
     return None
 
 
@@ -298,7 +291,6 @@ def upgrade_snapshots(cr, brol, upgrade_callback, executor):
         result = cr.fetchall()
         if not len(result):
             return
-        # for res_id, attach_id in result:
         return list(util.log_progress(executor.map(brol.upgrade_attachment_data, repeat(cr.dbname), *zip(*result), repeat(upgrade_callback)), _logger, size=len(result)))
     return None
 
