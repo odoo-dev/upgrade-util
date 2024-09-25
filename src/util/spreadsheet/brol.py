@@ -25,9 +25,9 @@ def update_spreadsheets_table_changes(cr):
     file_path = "/home/kelddun/rar-workspace/upgrade-util/src/util/spreadsheet/brol.py"
     brol = sys.modules[name] = util.import_script(file_path, name=name)
     update_documents(cr, brol)
-    update_dashboards(cr, brol)
-    update_templates(cr, brol)
-    update_snapshots(cr, brol)
+    # update_dashboards(cr, brol)
+    # update_templates(cr, brol)
+    # update_snapshots(cr, brol)
 
 
 def get_revisions(cr, res_model, res_id):
@@ -85,28 +85,40 @@ def _update_revisions(cr, res_model, res_id, *adapters):
 def update_spreadsheet(dbname, res_model, res_id, attachment_id, update_revisions=True):
     cursor = db_connect(dbname).cursor
     with cursor() as cr:
-        try:
-            cr.execute(
-                """
-                SELECT db_datas FROM ir_attachment
-                WHERE id=%s
-            """,
-                [attachment_id],
-            )
-            db_datas = cr.fetchone()[0]
+        # try:
+        cr.execute(
+            """
+            SELECT db_datas FROM ir_attachment
+            WHERE id=%s
+        """,
+            [attachment_id],
+        )
+        db_datas = cr.fetchone()[0]
 
-            if update_revisions:
-                all_adapters = _update_json(cr, attachment_id, db_datas)
-                _update_revisions(cr, res_model, res_id, *all_adapters)
-            else:
-                _update_json(cr, attachment_id, db_datas)
-        except Exception as e:
-            print("update post est ptééééé\n" * 20)
-            _logger.error("c'est cassé cheh, %s" % str(e))
+        if update_revisions:
+            all_adapters = _update_json(cr, attachment_id, db_datas)
+            _update_revisions(cr, res_model, res_id, *all_adapters)
+        else:
+            _update_json(cr, attachment_id, db_datas)
+        # except Exception as e:
+        #     print("update post est ptééééé\n" * 20)
+        #     _logger.error("c'est cassé cheh, %s" % str(e))
 
 
 def update_documents(cr, brol):
     if util.table_exists(cr, "documents_document"):
+
+        # cr.execute(r"""
+        #     SELECT doc.id AS document_id, a.id AS attachment_id
+        #         FROM documents_document doc
+        #     LEFT JOIN ir_attachment a ON a.id = doc.attachment_id
+        #         WHERE doc.handler='spreadsheet'
+        #     AND db_datas IS NOT null
+        #     """)
+
+        # for doc_id, attachment_id in cr.fetchall():
+        #     brol.update_spreadsheet(cr.dbname, "documents.document", doc_id, attachment_id)
+
         with ProcessPoolExecutor() as executor:
             cr.execute(r"""
                 SELECT doc.id AS document_id, a.id AS attachment_id

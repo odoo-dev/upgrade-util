@@ -21,6 +21,8 @@ def create_data_source_from_cmd(cmd):
     if cmd["type"] in ["CREATE_CHART", "UPDATE_CHART"]:
         return OdooChartCmdV16(cmd)
     elif cmd["type"] == "INSERT_PIVOT" or cmd["type"] == "RE_INSERT_PIVOT":
+        if version_gte("saas~17.2"):
+            return InsertPivotCmdV172(cmd)
         if version_gte("saas~17.1"):
             return InsertPivotCmdV171(cmd)
         return InsertPivotCmdV16(cmd)
@@ -494,3 +496,79 @@ class InsertPivotCmdV171(InsertPivotCmdV16):
     @property
     def id(self):
         return self.cmd["pivotId"]
+
+
+class InsertPivotCmdV172:
+    def __init__(self, cmd):
+        self.cmd = cmd
+
+    @property
+    def id(self):
+        return self.cmd["pivotId"]
+
+    @property
+    def model(self):
+        return self.cmd["metaData"]["resModel"]
+
+    @model.setter
+    def model(self, model):
+        self.cmd["metaData"]["resModel"] = model
+
+    @property
+    def domain(self):
+        return self.cmd["searchParams"]["domain"]
+
+    @domain.setter
+    def domain(self, domain):
+        self.cmd["searchParams"]["domain"] = domain
+
+    @property
+    def context(self):
+        return self.cmd["searchParams"]["context"]
+
+    @property
+    def order_by(self):
+        sorted_column = self.cmd["metaData"].get("sortedColumn")
+        if not sorted_column:
+            return
+        return {
+            "field": sorted_column["measure"],
+            "asc": sorted_column["order"].lower() == "asc",
+        }
+
+    @order_by.setter
+    def order_by(self, order_by):
+        sorted_column = {
+            "order": "asc" if order_by["asc"] else "desc",
+            "measure": order_by["field"],
+        }
+        self.cmd["metaData"]["sortedColumn"].update(sorted_column)
+
+    @property
+    def fields_matching(self):
+        return {}
+
+    @property
+    def measures(self):
+        return self.cmd["metaData"]["activeMeasures"]
+
+    @measures.setter
+    def measures(self, measures):
+        self.cmd["metaData"]["activeMeasures"] = measures
+
+    @property
+    def row_group_by(self):
+        return self.cmd["metaData"]["rowGroupBys"]
+
+    @row_group_by.setter
+    def row_group_by(self, group_by):
+        self.cmd["metaData"]["rowGroupBys"] = group_by
+
+    @property
+    def col_group_by(self):
+        return self.cmd["metaData"]["colGroupBys"]
+
+    @col_group_by.setter
+    def col_group_by(self, group_by):
+        self.cmd["metaData"]["colGroupBys"] = group_by
+
