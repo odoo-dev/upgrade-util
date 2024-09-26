@@ -674,6 +674,7 @@ class TestPG(UnitTestCase):
             q1,
             table="res_users",
             bucket_size=1,
+            format=False,
         )[0]
         self.assertEqual(out1, expected_out)
 
@@ -682,6 +683,7 @@ class TestPG(UnitTestCase):
             q2,
             table="res_users",
             bucket_size=1,
+            format=False,
         )[0]
         self.assertEqual(out2, expected_out)
 
