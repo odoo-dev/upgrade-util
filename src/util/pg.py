@@ -297,10 +297,10 @@ def explode_query_range(cr, query, table, alias=None, bucket_size=10000, prefix=
         # Still, since the query may only be valid if there is no split, we force the usage of `prefix` in the query to
         # validate its correctness and avoid scripts that pass the CI but fail in production.
         parallel_filter = "{alias}.id IS NOT NULL".format(alias=alias)
-        return [query.format(parallel_filter=parallel_filter)]
+        return [query.replace("{parallel_filter}", parallel_filter)]
 
     parallel_filter = "{alias}.id BETWEEN %(lower-bound)s AND %(upper-bound)s".format(alias=alias)
-    query = query.replace("%", "%%").format(parallel_filter=parallel_filter)
+    query = query.replace("%", "%%").replace("{parallel_filter}", parallel_filter)
     return [
         cr.mogrify(query, {"lower-bound": ids[i], "upper-bound": ids[i + 1] - 1}).decode() for i in range(len(ids) - 1)
     ]
