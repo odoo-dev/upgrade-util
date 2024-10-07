@@ -86,6 +86,8 @@ def _rename_model_in_pivot(spreadsheet: Spreadsheet, model_change):
 
     def adapt_insert(cmd):
         pivot = create_data_source_from_cmd(cmd)
+        if not pivot:
+            return
         if new := model_change.get(pivot.model, False):
             pivot.model = new
 

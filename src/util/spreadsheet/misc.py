@@ -166,6 +166,8 @@ def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_pre
 
     def adapt_insert(cmd):
         pivot = create_data_source_from_cmd(cmd)
+        if not pivot:
+            return None
         if insert_cmd_predicate(pivot):
             pivot_ids.append(pivot.id)
             return Drop

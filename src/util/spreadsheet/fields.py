@@ -204,12 +204,16 @@ def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, fields_changes):
 
     def adapt_insert(cmd):
         pivot = create_data_source_from_cmd(cmd)
+        if not pivot:
+            return
         rename(pivot)
         pivot_models[pivot.id] = pivot.model
         adapt_pivot_table(cmd)
 
     def adapt_pivot_table(cmd):
         pivot = create_data_source_from_cmd(cmd)
+        if not pivot:
+            return
         if fields := fields_changes.get(pivot_models[pivot.id], {}):
             for old, new in fields.items():
                 table = cmd["table"]
@@ -222,6 +226,7 @@ def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, fields_changes):
                     row["fields"] = _rename_fields(old, new, row["fields"])
                     row["values"] = _rename_fields(old, new, row["values"])
                 cmd["table"]["measures"] = _rename_fields(old, new, table["measures"])
+        return
 
     def modify_cmd_content(cmd):
         if "content" in cmd:
@@ -297,6 +302,8 @@ def _rename_field_in_filters(cr, spreadsheet: Spreadsheet, fields_changes):
 
     def collect_pivot(cmd):
         pivot = create_data_source_from_cmd(cmd)
+        if not pivot:
+            return
         pivot_models[pivot.id] = pivot.model
 
     def collect_list(cmd):
@@ -421,6 +428,8 @@ def _remove_field_from_pivot(cr, spreadsheet: Spreadsheet, models):
 
     def adapt_insert(cmd):
         pivot = create_data_source_from_cmd(cmd)
+        if not pivot:
+            return
         _remove_field(pivot)
 
     return (), (

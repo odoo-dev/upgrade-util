@@ -22,7 +22,8 @@ def create_data_source_from_cmd(cmd):
         return OdooChartCmdV16(cmd)
     elif cmd["type"] == "INSERT_PIVOT" or cmd["type"] == "RE_INSERT_PIVOT":
         if version_gte("saas~17.2"):
-            return InsertPivotCmdV172(cmd)
+            return None
+            # return InsertPivotCmdV172(cmd)
         if version_gte("saas~17.1"):
             return InsertPivotCmdV171(cmd)
         return InsertPivotCmdV16(cmd)
