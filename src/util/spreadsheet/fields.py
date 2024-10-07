@@ -236,6 +236,8 @@ def _rename_field_in_pivot(cr, spreadsheet: Spreadsheet, fields_changes):
 
     return (lambda cell: update_cell_content(cell),), (
         CommandAdapter("INSERT_PIVOT", adapt_insert),
+        CommandAdapter("ADD_PIVOT", adapt_insert),
+        CommandAdapter("UPDATE_PIVOT", adapt_insert),
         CommandAdapter("RE_INSERT_PIVOT", adapt_pivot_table),
         CommandAdapter("UPDATE_CELL", modify_cmd_content),
     )
@@ -317,6 +319,7 @@ def _rename_field_in_filters(cr, spreadsheet: Spreadsheet, fields_changes):
 
     return (), (
         CommandAdapter("INSERT_PIVOT", collect_pivot),
+        CommandAdapter("ADD_PIVOT", collect_pivot),
         CommandAdapter("INSERT_ODOO_LIST", collect_list),
         CommandAdapter("CREATE_CHART", collect_charts),
         CommandAdapter("ADD_GLOBAL_FILTER", adapt_filter),
@@ -435,7 +438,8 @@ def _remove_field_from_pivot(cr, spreadsheet: Spreadsheet, models):
     return (), (
         CommandAdapter("INSERT_PIVOT", adapt_insert),
         CommandAdapter("RE_INSERT_PIVOT", adapt_insert),
-        # CommandAdapter("RE_INSERT_PIVOT", adapt_insert),
+        CommandAdapter("ADD_PIVOT", adapt_insert),
+        CommandAdapter("UPDATE_PIVOT", adapt_insert),
     )
     ## missing update pivot // ADD PIVOT etc
     ## will probably need to vberion the removefield stuff

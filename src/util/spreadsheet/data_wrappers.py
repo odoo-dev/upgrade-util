@@ -20,6 +20,8 @@ structures and how they evolved between versions.
 def create_data_source_from_cmd(cmd):
     if cmd["type"] in ["CREATE_CHART", "UPDATE_CHART"]:
         return OdooChartCmdV16(cmd)
+    elif cmd["type"] == "ADD_PIVOT" or cmd["type"] == "UPDATE_PIVOT":
+        return AddPivotCmdV172(cmd)
     elif cmd["type"] == "INSERT_PIVOT" or cmd["type"] == "RE_INSERT_PIVOT":
         if version_gte("saas~17.2"):
             return None
@@ -499,7 +501,7 @@ class InsertPivotCmdV171(InsertPivotCmdV16):
         return self.cmd["pivotId"]
 
 
-class InsertPivotCmdV172:
+class AddPivotCmdV172:
     def __init__(self, cmd):
         self.cmd = cmd
 
@@ -509,27 +511,27 @@ class InsertPivotCmdV172:
 
     @property
     def model(self):
-        return self.cmd["metaData"]["resModel"]
+        return self.cmd["pivot"]["model"]
 
     @model.setter
     def model(self, model):
-        self.cmd["metaData"]["resModel"] = model
+        self.cmd["pivot"]["model"] = model
 
     @property
     def domain(self):
-        return self.cmd["searchParams"]["domain"]
+        return self.cmd["pivot"]["domain"]
 
     @domain.setter
     def domain(self, domain):
-        self.cmd["searchParams"]["domain"] = domain
+        self.cmd["pivot"]["domain"] = domain
 
     @property
     def context(self):
-        return self.cmd["searchParams"]["context"]
+        return self.cmd["pivot"]["context"]
 
     @property
     def order_by(self):
-        sorted_column = self.cmd["metaData"].get("sortedColumn")
+        sorted_column = self.cmd["pivot"].get("sortedColumn")
         if not sorted_column:
             return
         return {
@@ -543,7 +545,7 @@ class InsertPivotCmdV172:
             "order": "asc" if order_by["asc"] else "desc",
             "measure": order_by["field"],
         }
-        self.cmd["metaData"]["sortedColumn"].update(sorted_column)
+        self.cmd["pivot"]["sortedColumn"].update(sorted_column)
 
     @property
     def fields_matching(self):
@@ -551,25 +553,25 @@ class InsertPivotCmdV172:
 
     @property
     def measures(self):
-        return self.cmd["metaData"]["activeMeasures"]
+        return self.cmd["pivot"]["measures"]
 
     @measures.setter
     def measures(self, measures):
-        self.cmd["metaData"]["activeMeasures"] = measures
+        self.cmd["pivot"]["measures"] = measures
 
     @property
     def row_group_by(self):
-        return self.cmd["metaData"]["rowGroupBys"]
+        return self.cmd["pivot"]["rowGroupBys"]
 
     @row_group_by.setter
     def row_group_by(self, group_by):
-        self.cmd["metaData"]["rowGroupBys"] = group_by
+        self.cmd["pivot"]["rowGroupBys"] = group_by
 
     @property
     def col_group_by(self):
-        return self.cmd["metaData"]["colGroupBys"]
+        return self.cmd["pivot"]["colGroupBys"]
 
     @col_group_by.setter
     def col_group_by(self, group_by):
-        self.cmd["metaData"]["colGroupBys"] = group_by
+        self.cmd["pivot"]["colGroupBys"] = group_by
 

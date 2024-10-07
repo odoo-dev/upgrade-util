@@ -168,9 +168,12 @@ def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_pre
         pivot = create_data_source_from_cmd(cmd)
         if not pivot:
             return None
-        if insert_cmd_predicate(pivot):
-            pivot_ids.append(pivot.id)
-            return Drop
+        try:
+            if insert_cmd_predicate(pivot):
+                pivot_ids.append(pivot.id)
+                return Drop
+        except Exception as e:
+            print(cmd)
         return cmd
 
     def adapt_cmd_with_pivotId(cmd):
@@ -203,7 +206,9 @@ def remove_pivots(spreadsheet: Spreadsheet, pivot_ids: List[str], insert_cmd_pre
 
     return (lambda cell: update_cell_content(cell),), (
         CommandAdapter("INSERT_PIVOT", adapt_insert),
+        CommandAdapter("ADD_PIVOT", adapt_insert),
         CommandAdapter("RE_INSERT_PIVOT", adapt_re_insert),
+        CommandAdapter("UPDATE_PIVOT", adapt_re_insert),
         CommandAdapter("UPDATE_ODOO_PIVOT_DOMAIN", adapt_cmd_with_pivotId),
         CommandAdapter("RENAME_ODOO_PIVOT", adapt_cmd_with_pivotId),
         CommandAdapter("REMOVE_PIVOT", adapt_cmd_with_pivotId),

@@ -91,7 +91,10 @@ def _rename_model_in_pivot(spreadsheet: Spreadsheet, model_change):
         if new := model_change.get(pivot.model, False):
             pivot.model = new
 
-    return (), (CommandAdapter("INSERT_PIVOT", adapt_insert),)
+    return (), (
+        CommandAdapter("INSERT_PIVOT", adapt_insert),
+        CommandAdapter("ADD_PIVOT", adapt_insert),
+    )
 
 
 def _rename_model_in_filters(spreadsheet: Spreadsheet, model_change):
