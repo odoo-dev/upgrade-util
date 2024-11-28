@@ -1572,15 +1572,15 @@ class TestReplaceRecordReferences(UnitTestCase):
         mapping = {g1.id: g3.id, g2.id: g3.id}
 
         u1 = self.env["res.users"].create({"login": "U1", "name": "U1"})
-        u1.groups_id = g1 | g3
-        self.assertEqual(u1.groups_id.ids, [g1.id, g3.id])
+        u1.group_ids = g1 | g3
+        self.assertEqual(u1.group_ids.ids, [g1.id, g3.id])
         util.replace_record_references_batch(cr, mapping, "res.groups")
         util.invalidate(u1)
-        self.assertEqual(u1.groups_id.ids, [g3.id])
+        self.assertEqual(u1.group_ids.ids, [g3.id])
 
         u2 = self.env["res.users"].create({"login": "U2", "name": "U2"})
-        u2.groups_id = g1 | g2
-        self.assertEqual(u2.groups_id.ids, [g1.id, g2.id])
+        u2.group_ids = g1 | g2
+        self.assertEqual(u2.group_ids.ids, [g1.id, g2.id])
         util.replace_record_references_batch(cr, mapping, "res.groups")
         util.invalidate(u2)
-        self.assertEqual(u2.groups_id.ids, [g3.id])
+        self.assertEqual(u2.group_ids.ids, [g3.id])
