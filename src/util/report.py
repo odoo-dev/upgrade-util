@@ -89,6 +89,7 @@ ODOO_SHOWCASE_VIDEOS = {
 
 
 def add_to_migration_reports(message, category="Other", format="text"):
+    global migration_reports  # noqa: PLW0603
     assert format in {"text", "html", "md", "rst"}
     if format == "md":
         message = md2html(dedent(message))
@@ -101,6 +102,7 @@ def add_to_migration_reports(message, category="Other", format="text"):
         else:
             raw = True
     migration_reports.setdefault(category, []).append((message, raw))
+    migration_reports = dict(sorted(migration_reports.items()))
 
 
 def announce_release_note(cr):
