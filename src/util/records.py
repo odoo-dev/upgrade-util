@@ -1162,6 +1162,12 @@ def __update_record_from_xml(
                             id=node.attrib["id"],
                         )
                     )
+                if (
+                    version_gte("16.0")
+                    and "model" in node.attrib
+                    and node.get("model") in (inh.model for inh in for_each_inherit(cr, "template.reset.mixin"))
+                ):
+                    node.append(lxml.builder.E.field(os.path.join(from_module, f), name="template_fs"))
 
                 if node.tag == "template":
                     template = True
