@@ -140,15 +140,25 @@ def rename_custom_column(cr, table_name, col_name, new_col_name, custom_module=N
     )
 
 
-def reset_cowed_views(cr, xmlid, key=None):
+def reset_cowed_views(cr, xmlid, key=None, website_id=None):
     if "." not in xmlid:
         raise ValueError("Please use fully qualified name <module>.<name>")
 
     module, _, name = xmlid.partition(".")
     if not key:
         key = xmlid
-    cr.execute(
-        """
+    
+    params = [key, module, name]
+
+    if website_id is None:
+        website_condition = "u.website_id IS NOT NULL"
+    else:
+        website_condition = "u.website_id = ANY(%s)"
+        if not isinstance(website_id, (list, tuple, set)):
+            website_id = [website_id]
+        params.append(list(website_id))
+
+    query = f"""
         UPDATE ir_ui_view u
            SET arch_prev = u.arch_db,
                arch_db = v.arch_db
@@ -158,11 +168,10 @@ def reset_cowed_views(cr, xmlid, key=None):
          WHERE u.key = %s
            AND m.module = %s
            AND m.name = %s
-           AND u.website_id IS NOT NULL
+           AND {website_condition}
         RETURNING u.id
-        """,
-        [key, module, name],
-    )
+        """
+    cr.execute(query, params)
     return set(sum(cr.fetchall(), ()))
 
 
