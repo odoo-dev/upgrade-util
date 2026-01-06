@@ -588,11 +588,9 @@ def force_install_module(cr, module, if_installed=None, reason="it has been expl
         if not if_installed or modules_installed(cr, *if_installed):
             cr.execute("SELECT 1 FROM ir_module_module WHERE name = 'base' AND state != 'to upgrade'")
             if cr.rowcount:
-                if not ENVIRON.get("AUTO_DISCOVERY_RAN"):
-                    # run the autodiscovery once to allow to force install _new_ modules
-                    _trigger_auto_discovery(cr)
-                elif ENVIRON.get("AUTO_DISCOVERY_UPGRADE"):
+                if ENVIRON.get("AUTO_DISCOVERY_UPGRADE"):
                     raise MigrationError("`force_install_module` can only be called from pre/post of `base`")
+                _trigger_auto_discovery(cr)
                 return _force_install_module(cr, module, reason="{} (done outside of a major upgrade)".format(reason))
             ENVIRON["__modules_auto_discovery_force_installs"][module] = reason
         return None
@@ -1042,6 +1040,10 @@ def _trigger_auto_discovery(cr):
     # low level implementation.
     # Called by `base/0.0.0/post-modules-auto-discovery.py` script.
     # Use accumulated values for the auto_install and force_upgrade modules.
+
+    if ENVIRON["AUTO_DISCOVERY_RAN"]:
+        # prevent multiple runs
+        return
 
     ENVIRON["AUTO_DISCOVERY_RAN"] = True
 
