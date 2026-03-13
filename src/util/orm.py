@@ -285,6 +285,8 @@ def recompute_fields(cr, model, fields, ids=None, logger=_logger, chunk_size=256
         raise ValueError("Invalid strategy {!r}".format(strategy))
     if ids is not None and query is not None:
         raise ValueError("Cannot set both `ids` and `query`")
+    if not fields:
+        return
     Model = env(cr)[model] if isinstance(model, basestring) else model
     model = Model._name
 
