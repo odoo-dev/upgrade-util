@@ -105,7 +105,7 @@ def html_fields(cr):
            AND f.store = true
            AND m.transient = false
            AND f.model NOT LIKE 'ir.actions%'
-           AND f.model != 'mail.message'
+           AND f.model NOT IN ('mail.message', 'mail.mail')
       GROUP BY f.model
     """
     )
@@ -368,13 +368,96 @@ def convert_html_content(
         - "~* '\yabc.*xyz\y'"
     :param dict kwargs: extra keyword arguments to pass to :func:`convert_html_column`
     """
+    _convert_content(cr, html_fields, converter_callback, where_column, **kwargs)
+
+
+def change_snippet(cr, converter_callback, where_column, **kwargs):
+    r"""
+    Convert HTML content of snippets fields.
+
+    :param cursor cr: database cursor
+    :param func converter_callback: conversion function that converts the HTML
+        text content and returns a tuple with a boolean that indicates whether a
+        change happened and the new content must be saved
+    :param str where_column: filtering such as
+        - "like '%abc%xyz%'"
+        - "~* '\yabc.*xyz\y'"
+    :param dict kwargs: extra keyword arguments to pass to :func:`convert_html_column`
+    """
+
+    def snippet_fields(cr):
+        # FIXME limit to existing columns only
+        yield "blog_blog", "content"
+        yield "blog_post", "content"
+        yield "blog_post", "shortened_content"
+        yield "event_booth", "sponsor_website_description"
+        yield "event_booth_category", "description"
+        """
+ event.booth.registration                               | sponsor_website_description
+ event.event                                            | custom_roadshow_column_content
+ event.event                                            | description
+ event.event                                            | note
+ event.event                                            | ticket_instructions
+ event.sponsor                                          | website_description
+ event.track                                            | description
+ event.track                                            | partner_biography
+ event.type                                             | note
+ event.type                                             | ticket_instructions
+
+ forum.forum                                            | faq
+ forum.forum                                            | welcome_message
+ forum.post                                             | content
+
+ hr.job                                                 | website_description
+
+ mailing.mailing                                        | ab_testing_description
+ mailing.mailing                                        | body_arch
+ mailing.mailing                                        | body_html
+
+ product.product                                        | description_ecommerce
+ product.product                                        | public_description
+ product.product                                        | website_description
+ product.public.category                                | website_description
+ product.template                                       | website_description
+
+ res.partner                                            | website_description
+ res.users                                              | website_description
+
+ sale.order                                             | note
+ sale.order.template                                    | note
+
+ slide.channel                                          | access_error_msg
+ slide.channel                                          | description
+ slide.channel                                          | description_html
+ slide.channel                                          | description_short
+ slide.channel                                          | enroll_msg
+ slide.channel.invite                                   | body
+ slide.slide                                            | description
+ slide.slide                                            | embed_code
+ slide.slide                                            | embed_code_external
+ slide.slide                                            | html_content
+
+ website                                                | custom_code_footer
+ website                                                | custom_code_head
+ website.controller.page                                | warning_info
+ website.menu                                           | mega_menu_content
+ website.page                                           | warning_info
+        """
+
+        # XXX include all "manual" fields, just in case.
+        # XXX what about non-standard fields?
+
+    _convert_content(cr, snippet_fields, converter_callback, where_column, **kwargs)
+
+
+def _convert_content(cr, field_getter, converter_callback, where_column, **kwargs):
     if hasattr(converter_callback, "for_html"):  # noqa: SIM108
         html_converter = converter_callback.for_html()
     else:
         # trust the given converter to handle HTML
         html_converter = converter_callback
 
-    for table, columns in html_fields(cr):
+    for table, columns in field_getter(cr):
         convert_html_columns(cr, table, columns, html_converter, where_column=where_column, **kwargs)
 
     if hasattr(converter_callback, "for_qweb"):
