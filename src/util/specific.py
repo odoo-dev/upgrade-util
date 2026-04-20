@@ -127,6 +127,16 @@ def rename_custom_table(
 
     rename_table(cr, table_name, new_table_name, remove_constraints=False)
 
+    # update relation_table column for renamed m2m table
+    cr.execute(
+        """
+        UPDATE ir_model_fields
+           SET relation_table = %s
+         WHERE relation_table = %s
+        """,
+        [new_table_name, table_name],
+    )
+
     module_details = " from module '{}'".format(custom_module) if custom_module else ""
     add_to_migration_reports(
         category="Custom tables/columns",
