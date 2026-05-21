@@ -342,7 +342,7 @@ else:
 # fmt:on
 
 
-def remove_record(cr, name):
+def remove_record(cr, name, preserve_implied_groups=False):
     """
     Remove a record and its references corresponding to the given :term:`xml_id <external identifier>`.
 
@@ -382,7 +382,7 @@ def remove_record(cr, name):
 
     if model == "res.groups":
         _logger.log(NEARLYWARN, "Removing group %r", name)
-        return remove_group(cr, group_id=res_id)
+        return remove_group(cr, group_id=res_id, preserve_implied_groups=preserve_implied_groups)
 
     return remove_records(cr, model, [res_id])
 
@@ -679,7 +679,7 @@ def remove_menus(cr, menu_ids):
     )
 
 
-def remove_group(cr, xml_id=None, group_id=None):
+def remove_group(cr, xml_id=None, group_id=None, preserve_implied_groups=False):
     assert bool(xml_id) ^ bool(group_id)
     if xml_id:
         group_id = ref(cr, xml_id)
@@ -732,6 +732,40 @@ def remove_group(cr, xml_id=None, group_id=None):
             + "\nPlease remove them manually or remove the foreign key constraints set as RESTRICT."
         )
 
+    if version_gte("saas~18.2") and preserve_implied_groups:
+        cr.execute(
+            """
+            INSERT INTO res_groups_users_rel (gid, uid)
+            WITH RECURSIVE implied_by_groups AS (
+                SELECT gid, hid
+                  FROM res_groups_implied_rel
+                 WHERE hid = {group_id}
+
+                 UNION
+
+                SELECT rel.gid, rel.hid
+                  FROM res_groups_implied_rel rel
+                  JOIN implied_by_groups p
+                    ON rel.hid = p.gid
+
+            ), implied_by_groups_all_users AS (
+                SELECT rel.uid
+                  FROM res_groups_users_rel rel
+                  JOIN implied_by_groups ibg
+                    ON ibg.gid = rel.gid
+                    OR rel.gid = {group_id}
+
+              ), implied_ids AS (
+                SELECT hid
+                  FROM res_groups_implied_rel
+                 WHERE gid = {group_id}
+              )
+                SELECT child.hid, usr.uid
+                  FROM implied_ids child
+            CROSS JOIN implied_by_groups_all_users usr
+           ON CONFLICT DO NOTHING
+            """.format(group_id=group_id)
+        )
     remove_records(cr, "res.groups", [group_id])
 
 
