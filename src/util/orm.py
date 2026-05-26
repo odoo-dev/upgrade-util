@@ -270,7 +270,17 @@ def no_selection_cache_validation(f=None):
 
 
 @no_selection_cache_validation
-def recompute_fields(cr, model, fields, ids=None, logger=_logger, chunk_size=256, strategy="auto", query=None):
+def recompute_fields(
+    cr,
+    model,
+    fields,
+    ids=None,
+    logger=_logger,
+    chunk_size=256,
+    strategy="auto",
+    query=None,
+    _danger_tolerate_failures=False,
+):
     """
     Recompute field values.
 
@@ -304,6 +314,12 @@ def recompute_fields(cr, model, fields, ids=None, logger=_logger, chunk_size=256
         raise ValueError("Invalid strategy {!r}".format(strategy))
     if ids is not None and query is not None:
         raise ValueError("Cannot set both `ids` and `query`")
+
+    forced_logger = logger or _logger
+    if _danger_tolerate_failures:
+        # log a critical message to ensure a failure on CI
+        forced_logger.critical("`recompute_fields` called with the `_danger_tolerate_failures` argument.")
+
     Model = env(cr)[model] if isinstance(model, basestring) else model
     model = Model._name
 
@@ -319,7 +335,8 @@ def recompute_fields(cr, model, fields, ids=None, logger=_logger, chunk_size=256
     if not count:
         return
 
-    _logger.info("Computing fields %s of %r on %d records", fields, model, count)
+    if logger:
+        logger.info("Computing fields %s of %r on %d records", fields, model, count)
 
     if strategy == "auto":
         big_table = count > BIG_TABLE_THRESHOLD
@@ -338,13 +355,20 @@ def recompute_fields(cr, model, fields, ids=None, logger=_logger, chunk_size=256
             else:
                 Model.env.add_to_compute(field, records)
 
-        recompute(records)
-        # trigger dependent fields recomputation
-        records.modified(fields)
-        if strategy == "commit":
-            cr.commit()
+        try:
+            recompute(records)
+            # trigger dependent fields recomputation
+            records.modified(fields)
+        except Exception:
+            if not _danger_tolerate_failures:
+                raise
+            forced_logger.critical("Fail to recompute %r on %r", fields, records)
+            cr.rollback()
         else:
-            flush(records)
+            if strategy == "commit":
+                cr.commit()
+            else:
+                flush(records)
         invalidate(records)
 
 
