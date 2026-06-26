@@ -1805,6 +1805,7 @@ def get_m2m_on(cr, table):
            AND the_table.relname = %s
            AND other_table.relname != the_table.relname
            AND other_table.relkind = 'r'
+      GROUP BY t.relname, a1.attname, a2.attname, other_table.relname
     """
 
     cr.execute(query, [table])
