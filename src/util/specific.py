@@ -2,12 +2,12 @@
 import logging
 
 from .exceptions import UpgradeError
-from .helpers import _validate_table
+from .helpers import _validate_table, table_of_model
 from .misc import _cached, version_gte
 from .models import rename_model
 from .modules import rename_module
 from .orm import env
-from .pg import column_exists, format_query, parallel_execute, remove_constraint, rename_table, table_exists
+from .pg import column_exists, format_query, get_fk, parallel_execute, remove_constraint, rename_table, table_exists
 from .report import add_to_migration_reports
 
 try:
@@ -252,3 +252,74 @@ def translation2jsonb(cr, *fields):
         parallel_execute(cr, migrate_queries)
     parallel_execute(cr, all_cleanup_queries)
     return fields
+
+
+def remove_custom_fks_to_model(cr, relation_model, report_details=""):
+    """Remove custom many2one foreign keys pointing to a model.
+
+    Useful when a model is merged, removed, or renamed (e.g., hr.candidate → hr.applicant).
+    Finds all custom (manual) many2one fields referencing the model and removes their
+    actual foreign key constraints from the database.
+
+    :param str relation_model: Model being referenced (e.g., 'hr.candidate')
+    :param str report_details: Additional details for migration report
+    :return: List of (table, column) tuples for removed foreign keys
+    :rtype: list
+
+    Example:
+        ::
+            # Model hr.candidate merged into hr.applicant in saas~18.2
+            util.remove_custom_fks_to_model(cr, "hr.candidate")
+    """
+    cr.execute(
+        """
+        SELECT model, name
+          FROM ir_model_fields
+         WHERE state = 'manual'
+           AND ttype = 'many2one'
+           AND relation = %s
+        """,
+        (relation_model,),
+    )
+    custom_fks_map = {(table_of_model(cr, model), name) for model, name in cr.fetchall()}
+
+    if not custom_fks_map:
+        _logger.info("No custom many2one fields pointing to %r found", relation_model)
+        return []
+
+    # Get actual FK constraints on the relation model's table
+    relation_table = table_of_model(cr, relation_model)
+    removed_fks = []
+
+    for fk_table, fk_column, constraint_name, _ in get_fk(cr, relation_table, quote_ident=False):
+        if (fk_table, fk_column) in custom_fks_map:
+            remove_constraint(cr, fk_table, constraint_name, warn=False)
+            removed_fks.append((fk_table, fk_column))
+            _logger.warning(
+                "Removed custom FK %r.%r → %s (constraint: %r)",
+                fk_table,
+                fk_column,
+                relation_model,
+                constraint_name,
+            )
+    if removed_fks:
+        fk_list = "".join(f"<li>Table {t!r}, column {c!r}</li>" for t, c in removed_fks)
+        message = f"""
+            <details>
+                <summary>
+                    Model `{relation_model}` has been removed or merged.
+                    Custom foreign keys referencing it were removed.
+                </summary>
+                <ul>{fk_list}</ul>
+            </details>
+        """
+        if report_details:
+            message += f" {report_details}"
+
+        add_to_migration_reports(
+            category="Custom fields",
+            message=message,
+            format="html",
+        )
+
+    return removed_fks
