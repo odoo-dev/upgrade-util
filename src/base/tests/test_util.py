@@ -347,6 +347,184 @@ class TestAdaptOneDomain(UnitTestCase):
         self.assertEqual(new_domain, expected)
 
 
+class TestMakeSelectionValueBoolean(UnitTestCase):
+    def setUp(self):
+        super().setUp()
+        cr = self.env.cr
+        model_id = self.env["ir.model"]._get_id("res.users")
+
+        def _manual_field(name, ttype, **vals):
+            return self.env["ir.model.fields"].create(
+                dict({"name": name, "ttype": ttype, "model_id": model_id, "state": "manual"}, **vals)
+            )
+
+        self.sel_field = _manual_field(
+            "x_selection",
+            "selection",
+            selection_ids=[
+                (0, 0, {"value": "a", "name": "A"}),
+                (0, 0, {"value": "b", "name": "B"}),
+                (0, 0, {"value": "c", "name": "C"}),
+            ],
+        )
+        util.invalidate(self.env["ir.model.fields"])
+
+        # a record per selection value (plus one left unset)
+        Users = self.env["res.users"].with_context(no_reset_password=True)
+        self.rec = {}
+        for val in ("a", "b", "c", False):
+            login = "msvb_" + (val or "unset")
+            user = Users.create({"name": login, "login": login, "x_selection": val})
+            self.rec[val] = user.id
+        util.flush(Users)
+
+        # boolean targets created after the records exist, as in a real upgrade: `create_column`
+        # backfills existing rows to FALSE (then drops the column default).
+        util.create_column(cr, "res_users", "x_is_a", "boolean", default=False)
+        util.create_column(cr, "res_users", "x_is_b", "boolean", default=False)
+
+    def _new_filter(self, domain):
+        cr = self.env.cr
+        cr.execute(
+            "INSERT INTO ir_filters(name, model_id, domain, context, sort)"
+            "     VALUES ('t', 'res.users', %s, '{}', '[]') RETURNING id",
+            [str(domain)],
+        )
+        return cr.fetchone()[0]
+
+    def _filter_domain(self, filter_id):
+        self.env.cr.execute("SELECT domain FROM ir_filters WHERE id = %s", [filter_id])
+        return literal_eval(self.env.cr.fetchone()[0])
+
+    # complete mapping over [x_is_a, x_is_b] for the a/b/c selection (plus unset).
+    BOOL_FIELDS = ["x_is_a", "x_is_b"]
+    MAPPING = {"a": (True, False), "b": (False, True), "c": (False, False), None: (False, False)}
+
+    def _convert(self):
+        util.make_selection_value_boolean(self.env.cr, "res.users", "x_selection", self.BOOL_FIELDS, self.MAPPING)
+
+    def test_fill(self):
+        cr = self.env.cr
+        self._convert()
+
+        # every boolean column is filled explicitly from the selection value.
+        cr.execute("SELECT x_is_a, x_is_b FROM res_users WHERE id = %s", [self.rec["a"]])
+        self.assertEqual(cr.fetchone(), (True, False))
+        cr.execute("SELECT x_is_a, x_is_b FROM res_users WHERE id = %s", [self.rec["b"]])
+        self.assertEqual(cr.fetchone(), (False, True))
+        cr.execute("SELECT x_is_a, x_is_b FROM res_users WHERE id = %s", [self.rec["c"]])
+        self.assertEqual(cr.fetchone(), (False, False))
+        # unset row -> the None tuple (all False)
+        cr.execute("SELECT x_is_a, x_is_b FROM res_users WHERE id = %s", [self.rec[False]])
+        self.assertEqual(cr.fetchone(), (False, False))
+
+    @parametrize(
+        [
+            # `= value` -> conjunction over every boolean position (full tuple, not only the True ones)
+            ([("x_selection", "=", "a")], ["&", ("x_is_a", "=", True), ("x_is_b", "=", False)]),
+            # `!= value` -> De Morgan: disjunction of the negated leaves
+            ([("x_selection", "!=", "a")], ["|", ("x_is_a", "=", False), ("x_is_b", "=", True)]),
+            # `in` -> disjunction of the per-value conjunctions
+            (
+                [("x_selection", "in", ["a", "b"])],
+                [
+                    "|",
+                    "&",
+                    ("x_is_a", "=", True),
+                    ("x_is_b", "=", False),
+                    "&",
+                    ("x_is_a", "=", False),
+                    ("x_is_b", "=", True),
+                ],
+            ),
+            # `not in` -> conjunction of the per-value negations
+            (
+                [("x_selection", "not in", ["a", "b"])],
+                [
+                    "&",
+                    "|",
+                    ("x_is_a", "=", False),
+                    ("x_is_b", "=", True),
+                    "|",
+                    ("x_is_a", "=", True),
+                    ("x_is_b", "=", False),
+                ],
+            ),
+            # single-element list -> a single conjunction
+            ([("x_selection", "in", ["a"])], ["&", ("x_is_a", "=", True), ("x_is_b", "=", False)]),
+            # "c" and unset both map to (False, False)
+            ([("x_selection", "=", "c")], ["&", ("x_is_a", "=", False), ("x_is_b", "=", False)]),
+            # "is (not) set" tests map to the None tuple, they are rewritten too.
+            ([("x_selection", "=", False)], ["&", ("x_is_a", "=", False), ("x_is_b", "=", False)]),
+            ([("x_selection", "!=", False)], ["|", ("x_is_a", "=", True), ("x_is_b", "=", True)]),
+            # rewrite happens in place, other leaves are untouched
+            (
+                ["|", ("x_selection", "=", "b"), ("name", "=", "z")],
+                ["|", "&", ("x_is_a", "=", False), ("x_is_b", "=", True), ("name", "=", "z")],
+            ),
+            # an `in`/`not in` mixing a mapped value with one absent from the mapping (e.g. a stale
+            # value in an old domain): the mapped part is rewritten, the unmapped part kept as-is.
+            (
+                [("x_selection", "in", ["a", "d"])],
+                ["|", "&", ("x_is_a", "=", True), ("x_is_b", "=", False), ("x_selection", "in", ["d"])],
+            ),
+            (
+                [("x_selection", "not in", ["a", "d"])],
+                ["&", "|", ("x_is_a", "=", False), ("x_is_b", "=", True), ("x_selection", "not in", ["d"])],
+            ),
+        ]
+    )
+    def test_domain_operators(self, domain, expected):
+        # exercise the operator matrix through the real function, one filter per case.
+        fid = self._new_filter(domain)
+        util.invalidate(self.env["ir.filters"])
+        self._convert()
+        self.assertEqual(self._filter_domain(fid), expected)
+
+    def test_domain_negation(self):
+        # a leading '!' must not double-negate the rewrite (version-dependent normalization).
+        neg = self._new_filter(["!", ("x_selection", "=", "a")])
+        util.invalidate(self.env["ir.filters"])
+        self._convert()
+        if USE_ORM_DOMAIN:
+            expected = ["|", ("x_is_a", "=", False), ("x_is_b", "=", True)]
+        else:
+            expected = ["!", "&", ("x_is_a", "=", True), ("x_is_b", "=", False)]
+        self.assertEqual(self._filter_domain(neg), expected)
+
+    def test_length_mismatch_raises(self):
+        cr = self.env.cr
+        with self.assertRaises(util.exceptions.UpgradeError):
+            # "a" maps to a single bool but two fields were given
+            util.make_selection_value_boolean(cr, "res.users", "x_selection", ["x_is_a", "x_is_b"], {"a": (True,)})
+
+    def test_unset_defaults_to_all_false(self):
+        # omitting the falsy key defaults the unset case to all-False, both in the fill and domains.
+        cr = self.env.cr
+        eq_unset = self._new_filter([("x_selection", "=", False)])
+        util.invalidate(self.env["ir.filters"])
+        mapping = {"a": (True, False), "b": (False, True), "c": (False, False)}
+
+        util.make_selection_value_boolean(cr, "res.users", "x_selection", self.BOOL_FIELDS, mapping)
+
+        cr.execute("SELECT x_is_a, x_is_b FROM res_users WHERE id = %s", [self.rec[False]])
+        self.assertEqual(cr.fetchone(), (False, False))
+        self.assertEqual(self._filter_domain(eq_unset), ["&", ("x_is_a", "=", False), ("x_is_b", "=", False)])
+
+    def test_explicit_false_key_overrides_unset(self):
+        # a `False` key (like `None`) describes the unset case and overrides the all-False default.
+        cr = self.env.cr
+        eq_unset = self._new_filter([("x_selection", "=", False)])
+        util.invalidate(self.env["ir.filters"])
+        mapping = {"a": (True, False), "b": (False, True), "c": (False, False), False: (True, True)}
+
+        util.make_selection_value_boolean(cr, "res.users", "x_selection", self.BOOL_FIELDS, mapping)
+
+        cr.execute("SELECT x_is_a, x_is_b FROM res_users WHERE id = %s", [self.rec[False]])
+        self.assertEqual(cr.fetchone(), (True, True))
+        self.assertEqual(self._filter_domain(eq_unset), ["&", ("x_is_a", "=", True), ("x_is_b", "=", True)])
+
+
 class TestAdaptDomainView(UnitTestCase):
     def test_adapt_domain_view(self):
         tag = "list" if util.version_gte("saas~17.5") else "tree"

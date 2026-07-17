@@ -28,7 +28,7 @@ try:
 except ImportError:
     from openerp import release
 
-from .domains import FALSE_LEAF, TRUE_LEAF
+from .domains import AND_OPERATOR, FALSE_LEAF, OR_OPERATOR, TRUE_LEAF
 
 try:
     from odoo.tools.sql import make_index_name
@@ -1319,6 +1319,135 @@ def change_field_selection_values(cr, model, field, mapping, skip_inherit=()):
     # rename field on inherits
     for inh in for_each_inherit(cr, model, skip_inherit):
         change_field_selection_values(cr, inh.model, field, mapping=mapping, skip_inherit=skip_inherit)
+
+
+def make_selection_value_boolean(cr, model, selection_field, bool_fields, mapping, skip_inherit=()):
+    """
+    Turn a selection field into a set of boolean fields.
+
+    Each selection value is described by a tuple of booleans, one per field in `bool_fields`
+    (positionally aligned). The boolean columns are filled from the current selection value and
+    every stored domain is rewritten to the equivalent boolean expression.
+
+    `mapping` maps every selection value to a tuple of booleans of the same length as
+    `bool_fields`. The unset case (NULL selection) is described by the falsy key (`None` or
+    `False`); when it is absent it defaults to all-`False`, so callers only need to pass it to
+    override that default.
+
+    Because the mapping is total, the rewrite is exact: `selection == value` becomes the
+    conjunction of ``(bool_field, "=", flag)`` over every field (not only the `True` ones), and
+    the other operators follow. ``=``, ``!=``, ``in`` and ``not in`` are handled, including
+    comparisons against `False` (unset), which map to the falsy entry.
+
+    The boolean columns must already exist. This function only fills them and adapts domains; it
+    neither creates the columns nor removes the selection field.
+
+    .. example::
+        .. code-block:: python
+
+            util.make_selection_value_boolean(
+                cr,
+                "hr.payroll.warning",
+                "display_on",
+                ["display_on_dashboard", "display_on_model"],
+                {
+                    "dashboard": (True, False),
+                    "model": (False, True),
+                },
+            )
+
+    :param str model: model name of the selection field to transform
+    :param str selection_field: name of the selection field to transform
+    :param list(str) bool_fields: boolean field names the mapping tuples are aligned to
+    :param dict mapping: mapping from each selection value to a tuple of booleans; the falsy key
+                         (`None`/`False`) describes the unset case and defaults to all-`False`
+    :param list(str) or str skip_inherit: inheriting models to skip, use `"*"` to skip all
+    """
+    _validate_model(model)
+
+    err = ""  # sanity checks
+    for value, flags in mapping.items():
+        if len(flags) != len(bool_fields):
+            err = "value {!r} maps to {} booleans but {} fields were given".format(value, len(flags), len(bool_fields))
+        elif any(flag not in (True, False) for flag in flags):
+            err = "value {!r} maps to {} but only True/False values are allowed".format(value, flags)
+        if err:
+            raise UpgradeError("make_selection_value_boolean: " + err)
+
+    # normalize the "unset" mapping
+    if None in mapping and False in mapping:
+        if mapping[None] != mapping[False]:
+            raise UpgradeError("Incompatible None={} and False={} mappings".format(mapping[None], mapping[False]))
+    elif None in mapping:
+        mapping[False] = mapping[None]
+    elif False in mapping:
+        mapping[None] = mapping[False]
+    else:
+        mapping[None] = mapping[False] = (False,) * len(bool_fields)
+
+    table = table_of_model(cr, model)
+
+    # fill every boolean column explicitly (True and False positions) from the selection value.
+    # one `CASE` per boolean field, grouping the values that set it to each flag, in a single UPDATE.
+    set_exprs = []
+    params = []
+    for pos, bool_field in enumerate(bool_fields):
+        true_values = [v for v, flags in mapping.items() if flags[pos] and v]
+        none_is_true = mapping[None][pos]
+        # a row is True when its value is in `true_values`, or it is NULL and NULL maps to True
+        cond = "{selection_field} = ANY(%s)"
+        if none_is_true:
+            cond = "{selection_field} = ANY(%s) OR {selection_field} IS NULL"
+        params.append(true_values)
+        set_tmpl = "{bool_field} = CASE WHEN " + cond + " THEN True ELSE False END"
+        set_exprs.append(format_query(cr, set_tmpl, bool_field=bool_field, selection_field=selection_field))
+
+    query = format_query(
+        cr,
+        """
+        UPDATE {table}
+           SET {set_expr}
+         WHERE {{parallel_filter}}
+        """,
+        table=table,
+        set_expr=SQLStr(",\n".join(set_exprs)),
+    )
+    explode_execute(cr, cr.mogrify(query, params).decode(), table=table)
+
+    def adapter(leaf, _in_or="ignored", _negated="ignored"):
+        left, op, right = leaf
+        if op not in ("=", "!=", "<>", "in", "not in"):
+            return [(left, op, right)]
+
+        prefix = left[: -len(selection_field)]  # keep the "foo.bar." part, if any
+
+        # The mapping is total, so the rewrite is exact: `selection == value` is exactly the conjunction
+        # of the boolean columns matching that value's tuple, apply De Morgan laws for `!=`.
+        def _value_domain(value, disj=False):
+            leaves = [(prefix + bf, "=", not flag if disj else flag) for bf, flag in zip(bool_fields, mapping[value])]
+            return [OR_OPERATOR if disj else AND_OPERATOR] * (len(leaves) - 1) + leaves
+
+        if op in ("=", "!=", "<>"):
+            return [(left, op, right)] if right not in mapping else _value_domain(right, disj=op != "=")
+
+        # ("in", "not in") case
+        # in (mapped, unmapped) -> | [= map_val1], [= map_val2}, ..., [in unmmaped]
+        # not in (mapped, unmapped) -> & [!= map_val1], [!= map_val2], ..., [not in unmapped]
+        # apply recursion to the map_val leaves
+        values = list(right) if isinstance(right, (tuple, list)) else [right]
+        keys = [v for v in values if v in mapping]
+        disj = op == "in"
+        OP = OR_OPERATOR if disj else AND_OPERATOR
+        leaves = [(left, "=" if disj else "!=", k) for k in keys]
+        domain = [OP] * (len(leaves) - 1) + [t for leave in leaves for t in adapter(leave)]
+
+        unmapped_keys = [v for v in values if v not in mapping]
+        if unmapped_keys:
+            domain = [OP] + domain + [(left, op, unmapped_keys)]
+        return domain
+
+    # `new == selection_field` so untouched leaves keep the original field name
+    adapt_domains(cr, model, selection_field, selection_field, adapter=adapter, skip_inherit=skip_inherit)
 
 
 def is_field_anonymized(cr, model, field):
