@@ -52,6 +52,12 @@ except NameError:
 
 _logger = logging.getLogger(__name__)
 
+ODOO_UPG_MAX_LOOPS_NON_STORED_RELATED = os.getenv("ODOO_UPG_MAX_LOOPS_NON_STORED_RELATED", "10")
+try:
+    ODOO_UPG_MAX_LOOPS_NON_STORED_RELATED = int(ODOO_UPG_MAX_LOOPS_NON_STORED_RELATED)
+except ValueError:
+    ODOO_UPG_MAX_LOOPS_NON_STORED_RELATED = 10
+
 
 def env(cr):
     """
@@ -556,6 +562,61 @@ class iter_browse(object):
         )
 
 
+def _convert_field_related_non_store(cr):
+    all_bads = []
+    # multi pass because update adds new non-stored fields :/
+    # DBs needing more than one pass have a complex related through a custom field, should be rare
+    for loop in range(ODOO_UPG_MAX_LOOPS_NON_STORED_RELATED):  # max loop just in case
+        bad = _pass(cr)
+        if not bad:
+            break
+        all_bads.extend(bad)
+
+    return all_bads
+
+def _pass(cr):
+    cr.execute(
+        r"""
+        SELECT id,
+               model,
+               name,
+               related
+          FROM ir_model_fields
+         WHERE related IS NOT NULL
+           AND name LIKE 'x\_%'
+           AND store
+           AND state = 'manual'
+           AND related LIKE '%.%' --at least two parts
+      ORDER BY id
+        """
+    )
+
+    bad = []
+    for fid, model, name, path in cr.fetchall():
+        # drop the last part, it's OK if the last one is non-stored
+        parts = util.resolve_model_fields_path(cr, model, path.split("."))[:-1]
+        if not parts:
+
+        cr.execute(
+            """
+            SELECT f.model || '.' || f.name
+              FROM (SELECT UNNEST(%s), UNNEST(%s)) AS part(model, name)
+              JOIN ir_model_fields f
+                ON f.model = part.model
+               AND f.name = part.name
+               AND f.store IS NOT True
+             LIMIT 1
+            """,
+            [[p.field_model for p in parts], [p.field_name for p in parts]],
+        )
+        if not cr.rowcount:
+            continue
+        bad_part = cr.fetchone()[0]
+        bad.extend(fid)
+    if bad:
+        cr.execute("UPDATE ir_model_fields SET store = False WHERE id IN %s", [tuple(bad)])
+    return bad
+
 @contextmanager
 def custom_module_field_as_manual(env, rollback=True, do_flush=False):
     """
@@ -692,6 +753,9 @@ def custom_module_field_as_manual(env, rollback=True, do_flush=False):
             (model, tuple(reserved_words)),
         )
         updated_field_ids += [r[0] for r in env.cr.fetchall()]
+
+    # 2.2.1 Convert store related field with non-store field in related path 
+    update_store_field_ids = _convert_field_related_non_store(cr)
 
     # 2.3 Temporarily disable rules that come from custom modules
     standard_modules = modules.get_modules()
