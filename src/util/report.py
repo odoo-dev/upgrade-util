@@ -379,6 +379,7 @@ def announce(
             poster = recipient.message_post
         except (ValueError, AttributeError):
             # Cannot find record, post the message on the wall of the admin
+            # 
             recipient = False
             pass
 
