@@ -2,6 +2,7 @@
 """Utility functions for interacting with PostgreSQL."""
 
 import collections
+import itertools
 import logging
 import os
 import re
@@ -173,6 +174,26 @@ def execute_values(cr, query, argslist, template=None, page_size=100, fetch=Fals
     from psycopg2.extras import execute_values as _pg2_execute_values  # noqa: PLC0415 - psycopg2 fallback
 
     return _pg2_execute_values(cr._obj, query, argslist, template=template, page_size=page_size, fetch=fetch)
+
+
+def execute_batch(cr, query, argslist, page_size=100):
+    """psycopg2/psycopg3 compatible ``execute_batch``.
+
+    psycopg2 needs ``psycopg2.extras``; psycopg3 has no ``execute_batch`` on the
+    cursor, so batches are executed with ``executemany`` instead.
+    """
+    if not hasattr(cr, "execute_values"):  # psycopg2 cursor
+        from psycopg2.extras import execute_batch as _pg2_execute_batch  # noqa: PLC0415 - psycopg2 fallback
+
+        return _pg2_execute_batch(cr._obj, query, argslist, page_size=page_size)
+    # psycopg3: executemany takes an iterable of params; batches chunks to avoid
+    # unbounded memory (argslist may be a generator).
+    argslist = iter(argslist)
+    while True:
+        batch = list(itertools.islice(argslist, page_size))
+        if not batch:
+            break
+        cr.executemany(query, batch)
 
 
 def json_wrap(cr, value):
