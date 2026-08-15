@@ -14,9 +14,7 @@ import re
 import warnings
 from ast import literal_eval
 
-import psycopg2
 from psycopg2 import sql
-from psycopg2.extras import Json
 
 try:
     from odoo import modules
@@ -59,16 +57,20 @@ from .pg import (
     column_exists,
     column_type,
     create_m2m,
+    execute_values,
     explode_execute,
     explode_query_range,
     format_query,
     get_columns,
     get_value_or_en_translation,
+    json_wrap,
+    mogrify,
     parallel_execute,
     pg_html_escape,
     pg_replace,
     pg_text2html,
     remove_column,
+    server_version,
     table_exists,
     target_of,
 )
@@ -297,7 +299,7 @@ def remove_field(
                    SET field_info = %s
                  WHERE field_id = %s
                 """,
-                (psycopg2.extras.Json(fields_info), field_id),
+                (json_wrap(cr, fields_info), field_id),
             )
 
     # remove this field from dependencies of other fields
@@ -393,9 +395,9 @@ def remove_field(
         if stored and column_type(cr, table, fieldname) == "bytea":
             _extract_data_as_attachment(cr, model, fieldname, set_res_field=False)
         if column_exists(cr, "ir_attachment", "res_field"):
-            query = cr.mogrify(
-                "UPDATE ir_attachment SET res_field = NULL WHERE res_model = %s AND res_field = %s", [model, fieldname]
-            ).decode()
+            query = mogrify(
+                cr, "UPDATE ir_attachment SET res_field = NULL WHERE res_model = %s AND res_field = %s", [model, fieldname]
+            )
             explode_execute(cr, query, table="ir_attachment")
 
     elif column_exists(cr, "ir_attachment", "res_field"):
@@ -403,9 +405,7 @@ def remove_field(
             cr,
             explode_query_range(
                 cr,
-                cr.mogrify(
-                    "DELETE FROM ir_attachment WHERE res_model = %s AND res_field = %s", [model, fieldname]
-                ).decode(),
+                mogrify(cr, "DELETE FROM ir_attachment WHERE res_model = %s AND res_field = %s", [model, fieldname]),
                 table="ir_attachment",
             ),
         )
@@ -829,7 +829,7 @@ def convert_m2o_field_to_m2m(cr, model, field, new_name=None, m2m_table=None, co
     m2m_table = create_m2m(cr, m2m_table or AUTO, table1, table2, col1, col2)
 
     dedup = SQLStr("ON CONFLICT DO NOTHING")
-    if cr._cnx.server_version < 90500:
+    if server_version(cr) < 90500:
         # Approximate version for older PG versions
         dedup = format_query(
             cr,
@@ -903,7 +903,7 @@ def _convert_field_to_company_dependent(
     if default_value is None:  # noqa: SIM108
         where_condition = "{0} IS NOT NULL"
     else:
-        where_condition = cr.mogrify("{0} != %s", [default_value]).decode()
+        where_condition = mogrify(cr, "{0} != %s", [default_value])
 
     if company_field:
         where_condition += format_query(cr, " AND {} IS NOT NULL", company_field)
@@ -997,7 +997,7 @@ def _convert_field_to_property(
         # if field is anonymized, we need to create a property for each record
         where_clause = "true"
         # and we need to unanonymize its values
-        ano_default_value = cr.mogrify("%s", [default_value])
+        ano_default_value = mogrify(cr, "%s", [default_value])
         if type != "many2one":  # noqa: SIM108
             ano_value_select = "%(value)s"
         else:
@@ -1086,15 +1086,16 @@ def _extract_data_as_attachment(cr, model, field, encoded=True, name_field=None,
     table = table_of_model(cr, model)
     if not column_exists(cr, table, field):
         return
-    name_query = cr.mogrify(
+    name_query = mogrify(
+        cr,
         format_query(cr, "COALESCE({}, CONCAT(%s, '(', id, ').', %s))", name_field if name_field else SQLStr("NULL")),
         [model.title().replace(".", ""), field],
-    ).decode()
+    )
 
     if not column_exists(cr, "ir_attachment", "res_field"):
         res_field_query = SQLStr("")
     elif set_res_field:
-        res_field_query = SQLStr(cr.mogrify(", res_field = %s", [field]).decode())
+        res_field_query = SQLStr(mogrify(cr, ", res_field = %s", [field]))
     else:
         res_field_query = SQLStr(", res_field = NULL")
 
@@ -1234,7 +1235,7 @@ def change_field_selection_values(cr, model, field, mapping, skip_inherit=()):
 
         data = [list(mapping.keys()), list(mapping.values())]
         queries = [
-            cr.mogrify(q, data).decode()
+            mogrify(cr, q, data)
             for q in explode_query_range(cr, format_query(cr, query, table=table, column=field), table=table, alias="t")
         ]
         parallel_execute(cr, queries)
@@ -1255,7 +1256,7 @@ def change_field_selection_values(cr, model, field, mapping, skip_inherit=()):
             """
             data = [list(mapping.keys()), list(mapping.values()), fields_id]
             queries = [
-                cr.mogrify(q, data).decode() for q in explode_query_range(cr, query, table="ir_property", alias="p")
+                mogrify(cr, q, data) for q in explode_query_range(cr, query, table="ir_property", alias="p")
             ]
             parallel_execute(cr, queries)
 
@@ -1394,7 +1395,8 @@ def update_field_references(cr, old, new, only_models=None, domain_adapter=None,
 
 
 def _update_impex_renamed_fields_paths(cr, old_field_name, new_field_name, only_models):
-    export_q = cr.mogrify(
+    export_q = mogrify(
+        cr,
         """
         SELECT el.id,
                e.resource,
@@ -1405,10 +1407,11 @@ def _update_impex_renamed_fields_paths(cr, old_field_name, new_field_name, only_
          WHERE el.name ~ %s
         """,
         [r"\y{}\y".format(old_field_name)],
-    ).decode()
+    )
     impex_data = [(export_q, "ir_exports_line", "name")]
     if table_exists(cr, "base_import_mapping"):
-        import_q = cr.mogrify(
+        import_q = mogrify(
+            cr,
             """
             SELECT id,
                    res_model,
@@ -1417,7 +1420,7 @@ def _update_impex_renamed_fields_paths(cr, old_field_name, new_field_name, only_
              WHERE field_name ~ %s
             """,
             [r"\y{}\y".format(old_field_name)],
-        ).decode()
+        )
         impex_data.append((import_q, "base_import_mapping", "field_name"))
 
     for query, table, column in impex_data:
@@ -1443,7 +1446,7 @@ def _update_impex_renamed_fields_paths(cr, old_field_name, new_field_name, only_
         if fixed_paths:
             cr.execute(
                 format_query(cr, "UPDATE {} SET {} = (%s::jsonb)->>(id::text) WHERE id IN %s", table, column),
-                [Json(fixed_paths), tuple(fixed_paths)],
+                [json_wrap(cr, fixed_paths), tuple(fixed_paths)],
             )
 
 
@@ -1572,7 +1575,7 @@ def _update_field_usage_multi(cr, models, old, new, domain_adapter=None, skip_in
                         to_update[rec_id] = new_path
             if to_update:
                 upd_query = format_query(cr, "UPDATE {} SET {} = %s::jsonb->>id::text WHERE id IN %s", table, column)
-                cr.execute(upd_query, [Json(to_update), tuple(to_update)])
+                cr.execute(upd_query, [json_wrap(cr, to_update), tuple(to_update)])
 
     # Modifying server action is dangerous.
     # The search pattern can be anywhere in the code, leading to invalid codes.
@@ -1881,8 +1884,8 @@ def update_server_actions_fields(cr, src_model, dst_model=None, fields_mapping=N
             [src_model, _dst_model],
         )
     else:
-        psycopg2.extras.execute_values(
-            cr._obj,
+        execute_values(
+            cr,
             """
             WITH field_ids AS (
                 SELECT mf1.id as old_field_id, mf2.id as new_field_id
@@ -2162,7 +2165,8 @@ def dump_field_to_chatter(
             value_join=value_join,
             col=fallback_column,
         )
-    query = cr.mogrify(
+    query = mogrify(
+        cr,
         query,
         {
             "res_model": res_model,
@@ -2172,6 +2176,6 @@ def dump_field_to_chatter(
             "label": label,
             "filler": "<br/><br/>" if html_escape else "\n\n",
         },
-    ).decode()
+    )
 
     explode_execute(cr, query, table=explode_table, alias=explode_alias)

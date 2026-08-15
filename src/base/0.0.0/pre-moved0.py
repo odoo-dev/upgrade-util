@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-from psycopg2.extras import Json
-
 from odoo.addons.base.maintenance.migrations import util
 
 KEY = "base.tests.test_moved0.TestMoved0"
@@ -46,5 +44,5 @@ def migrate(cr, version):
     if value:
         cr.execute(
             "INSERT INTO upgrade_test_data(key, value) VALUES (%s, %s)",
-            [KEY, Json(value)],
+            [KEY, util.json_wrap_driverless(value)],
         )

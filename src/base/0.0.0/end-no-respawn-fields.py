@@ -2,8 +2,6 @@
 import logging
 import os
 
-from psycopg2.extras import execute_values
-
 from odoo.addons.base.maintenance.migrations import util
 
 _logger = logging.getLogger("odoo.addons.base.maintenance.migrations.base.000.no_respawn")
@@ -19,8 +17,8 @@ def migrate(cr, version):
         )
     """
     )
-    execute_values(
-        cr._obj,
+    util.execute_values(
+        cr,
         "INSERT INTO no_respawn(model, field) VALUES %s",
         [
             (model, field)

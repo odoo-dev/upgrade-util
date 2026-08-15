@@ -27,6 +27,7 @@ from .pg import (
     get_fk,
     get_m2m_on,
     get_value_or_en_translation,
+    mogrify,
     parallel_execute,
     query_ids,
     table_exists,
@@ -114,7 +115,8 @@ def remove_model(cr, model, drop_table=True, ignore_m2m=()):
             continue
         ref_model = model_of_table(cr, ir.table)
 
-        query = cr.mogrify(
+        query = mogrify(
+            cr,
             """
                 SELECT d.res_id
                   FROM ir_model_data d
@@ -124,12 +126,12 @@ def remove_model(cr, model, drop_table=True, ignore_m2m=()):
                 GROUP BY d.res_id
             """.format(ir.table, ir.model_filter(prefix="r.")),
             [ref_model, model],
-        ).decode()
+        )
         if not ir.set_unknown:
             # If not set_unknown, all records should be deleted.
-            query = cr.mogrify(
-                'SELECT id FROM "{}" r WHERE {}'.format(ir.table, ir.model_filter(prefix="r.")), [model]
-            ).decode()
+            query = mogrify(
+                cr, 'SELECT id FROM "{}" r WHERE {}'.format(ir.table, ir.model_filter(prefix="r.")), [model]
+            )
 
         with query_ids(cr, query, itersize=chunk_size) as ids_:
             if ir.table == "ir_ui_view":
@@ -145,9 +147,9 @@ def remove_model(cr, model, drop_table=True, ignore_m2m=()):
 
         if ir.set_unknown:
             # Link remaining records not linked to a XMLID
-            query = cr.mogrify(
-                'SELECT id FROM "{}" r WHERE {}'.format(ir.table, ir.model_filter(prefix="r.")), [model]
-            ).decode()
+            query = mogrify(
+                cr, 'SELECT id FROM "{}" r WHERE {}'.format(ir.table, ir.model_filter(prefix="r.")), [model]
+            )
             cr.execute(query)
             ids = [id for (id,) in cr.fetchall()]
             if ids:
@@ -343,7 +345,7 @@ def rename_model(cr, old, new, rename_table=True, ignored_m2ms="ALL_BEFORE_18_1"
         cr.execute("SELECT 1 FROM {t} WHERE {c}=%s LIMIT 1".format(t=table, c=column), [old])
         if not cr.fetchone():
             continue
-        query = cr.mogrify("UPDATE {t} SET {c}=%s WHERE {c}=%s".format(t=table, c=column), [new, old]).decode()
+        query = mogrify(cr, "UPDATE {t} SET {c}=%s WHERE {c}=%s".format(t=table, c=column), [new, old])
         explode_execute(cr, query, table=table)
 
     # "model-comma" fields
@@ -357,13 +359,14 @@ def rename_model(cr, old, new, rename_table=True, ignored_m2ms="ALL_BEFORE_18_1"
     for model, column in cr.fetchall():
         table = table_of_model(cr, model)
         if column_updatable(cr, table, column):
-            query = cr.mogrify(
+            query = mogrify(
+                cr,
                 """
                     UPDATE "{table}"
                        SET "{column}"='{new}' || substring("{column}" FROM '%#",%#"' FOR '#')
                      WHERE "{column}" LIKE '{old},%'
-            """.format(table=table, column=column, new=new, old=old)
-            ).decode()
+            """.format(table=table, column=column, new=new, old=old),
+            )
             explode_execute(cr, query, table=table)
 
     # defaults
@@ -554,7 +557,7 @@ def merge_model(cr, source, target, drop_table=True, fields_mapping=None, ignore
                 )
             where = " AND ".join(where_clauses) or "true"
             query = "UPDATE {t} t SET {c}=%(new)s WHERE {w} AND {c}=%(old)s".format(t=ir.table, c=ir.res_model, w=where)
-            fmt_query = cr.mogrify(query, {"new": target, "old": source}).decode()
+            fmt_query = mogrify(cr, query, {"new": target, "old": source})
             if column_exists(cr, ir.table, "id"):
                 parallel_execute(cr, explode_query_range(cr, fmt_query, table=ir.table, alias="t"))
             else:
@@ -672,7 +675,7 @@ def remove_inherit_from_model(
                         model_filter=ir.model_filter(prefix="t."),
                         res_model=ir.res_model_id if ir.res_model_id else ir.res_model,
                     )
-                    query = cr.mogrify(query, [model]).decode()
+                    query = mogrify(cr, query, [model])
                     explode_execute(
                         cr,
                         query,
@@ -682,9 +685,9 @@ def remove_inherit_from_model(
                         qualifier="reset {}.{} update".format(table, pc),
                     )
 
-                query = cr.mogrify(
-                    format_query(cr, "DELETE FROM {} WHERE ({})", ir.table, sql.SQL(ir.model_filter())), [model]
-                ).decode()
+                query = mogrify(
+                    cr, format_query(cr, "DELETE FROM {} WHERE ({})", ir.table, sql.SQL(ir.model_filter())), [model]
+                )
                 explode_execute(cr, query, table=table, logger=logger, qualifier="delete {} queries".format(table))
                 irs_done.add(ir)
         # skip_inherit set to `*` as inherits will be removed by the recursive call.

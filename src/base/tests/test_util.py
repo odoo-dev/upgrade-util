@@ -2012,7 +2012,7 @@ class TestRecords(UnitTestCase):
         self.assertRegex(test_partner_category.name, pattern_notouch)
         self.assertRegex(test_partner_category.name, pattern_old)
 
-        extra_filter = self.env.cr.mogrify("t.id = %s", (test_partner_category.id,)).decode()
+        extra_filter = util.mogrify(self.env.cr, "t.id = %s", (test_partner_category.id,))
         util.replace_in_all_jsonb_values(self.env.cr, "res_partner_category", "name", ".number", ".name", extra_filter)
         util.replace_in_all_jsonb_values(
             self.env.cr, "res_partner_category", "name", r"""'<"x">\y""", "GONE", extra_filter

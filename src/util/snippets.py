@@ -10,8 +10,6 @@ from concurrent.futures import ProcessPoolExecutor
 
 from lxml import etree, html
 from psycopg2 import sql
-from psycopg2.extensions import quote_ident
-from psycopg2.extras import Json
 
 with contextlib.suppress(ImportError):
     from odoo import sql_db
@@ -20,7 +18,17 @@ from .const import NEARLYWARN
 from .helpers import table_of_model
 from .misc import log_progress, make_pickleable_callback, version_gte
 from .modules import INSTALLED_MODULE_STATES
-from .pg import SQLStr, column_exists, column_type, format_query, get_max_workers, table_exists
+from .pg import (
+    SQLStr,
+    column_exists,
+    column_type,
+    format_query,
+    get_max_workers,
+    json_wrap_driverless,
+    mogrify,
+    quote_ident,
+    table_exists,
+)
 
 _logger = logging.getLogger(__name__)
 utf8_parser = html.HTMLParser(encoding="utf-8")
@@ -49,7 +57,7 @@ def add_snippet_names(cr, table, column, snippets, select_query):
     it = log_progress(cr.fetchall(), _logger, qualifier="rows", size=cr.rowcount, log_hundred_percent=True)
 
     def quote(ident):
-        return quote_ident(ident, cr._cnx)
+        return quote_ident(ident)
 
     for res_id, regex_matches, arch in it:
         regex_matches = [match[0] for match in regex_matches]  # noqa: PLW2901
@@ -69,7 +77,8 @@ def add_snippet_names(cr, table, column, snippets, select_query):
 
 def add_snippet_names_on_html_field(cr, table, column, snippets, regex):
     """Search for all the snippets in the fields mentioned (should be html fields) and add the corresponding data-snippet on them."""
-    query = cr.mogrify(
+    query = mogrify(
+        cr,
         sql.SQL(
             """
             SELECT id, array((SELECT regexp_matches({column}, %(regex)s, 'g'))), {column}
@@ -78,8 +87,8 @@ def add_snippet_names_on_html_field(cr, table, column, snippets, regex):
             """
         ).format(column=sql.Identifier(column), table=sql.Identifier(table)),
         {"regex": regex},
-    ).decode()
-    where = cr.mogrify(sql.SQL("{column} ~ %s").format(column=sql.Identifier(column)), [regex]).decode()
+    )
+    where = mogrify(cr, sql.SQL("{column} ~ %s").format(column=sql.Identifier(column)), [regex])
     ids_ranges = determine_chunk_limit_ids(cr, table, [column], where)
     for id0, id1 in ids_ranges:
         add_snippet_names(cr, table, column, snippets, query + f" AND id BETWEEN {id0} AND {id1}")
@@ -99,7 +108,7 @@ def get_html_fields(cr):
     # yield (table, column) of stored html fields (that needs snippets updates)
     for table, columns in html_fields(cr):
         for column in columns:
-            yield table, quote_ident(column, cr._cnx)
+            yield table, quote_ident(column)
 
 
 def _html_fields(cr, modules):
@@ -323,7 +332,7 @@ class Convertor:
                 if has_changed:
                     for lang, value in content.items():
                         _, new_content[lang] = converter_callback(value)
-                new_content = Json(new_content)
+                new_content = json_wrap_driverless(new_content)
             else:
                 has_changed, new_content = converter_callback(content)
             changes[column] = new_content
@@ -401,7 +410,7 @@ if sys.version_info < (3, 7):
 
 def determine_chunk_limit_ids(cr, table, column_arr, where):
     bytes_per_chunk = 10 * 1024 * 1024
-    columns = ", ".join(quote_ident(column, cr._cnx) for column in column_arr if column != "id")
+    columns = ", ".join(quote_ident(column) for column in column_arr if column != "id")
     cr.execute(
         f"""
          WITH info AS (

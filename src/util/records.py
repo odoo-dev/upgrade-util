@@ -1,5 +1,6 @@
 """Utility functions for record-level operations."""
 
+import json
 import logging
 import os
 import re
@@ -10,7 +11,6 @@ from operator import itemgetter
 
 import lxml
 from psycopg2 import sql
-from psycopg2.extras import Json, execute_values
 
 try:
     from odoo import modules
@@ -46,6 +46,7 @@ from .pg import (
     column_exists,
     column_type,
     column_updatable,
+    execute_values,
     explode_execute,
     explode_query_range,
     format_query,
@@ -53,6 +54,8 @@ from .pg import (
     get_fk,
     get_m2m_on,
     get_value_or_en_translation,
+    json_wrap,
+    mogrify,
     parallel_execute,
     table_exists,
     target_of,
@@ -303,11 +306,12 @@ def edit_view(cr, xmlid=None, view_id=None, skip_if_not_noupdate=True, active="a
                 yield arch_etree
                 new_arch = lxml.etree.tostring(arch_etree, encoding="unicode")
                 terms_en = translation_terms["en_US"]
-                arch_column_value = Json(
+                arch_column_value = json_wrap(
+                    cr,
                     {
                         lang: xml_translate(dict(zip(terms_en, terms)).get, new_arch)
                         for lang, terms in translation_terms.items()
-                    }
+                    },
                 )
             else:
                 arch_etree = parse(arch)
@@ -336,7 +340,7 @@ def add_view(cr, name, model, view_type, arch_db, inherit_xml_id=None, priority=
         key = "gen_key.%s" % str(uuid.uuid4())[:6]
     arch_col = "arch_db" if column_exists(cr, "ir_ui_view", "arch_db") else "arch"
     jsonb_column = column_type(cr, "ir_ui_view", arch_col) == "jsonb"
-    arch_column_value = Json({"en_US": arch_db}) if jsonb_column else arch_db
+    arch_column_value = json_wrap(cr, {"en_US": arch_db}) if jsonb_column else arch_db
     extra = (
         [arch_col]
         + (["key"] if key_exist else [])
@@ -466,7 +470,7 @@ def remove_records(cr, model, ids):
     base_query = format_query(cr, "DELETE FROM {} WHERE id IN %s", table)
     parallel_execute(
         cr,
-        [cr.mogrify(base_query, [chunk_ids]).decode() for chunk_ids in chunks(ids, 1000, fmt=tuple)],
+        [mogrify(cr, base_query, [chunk_ids]) for chunk_ids in chunks(ids, 1000, fmt=tuple)],
     )
     for ir in indirect_references(cr, bound_only=True):
         if not ir.company_dependent_comodel:
@@ -477,14 +481,16 @@ def remove_records(cr, model, ids):
                 ir.model_filter(),
                 ir.res_id,
             )
-            parallel_execute(cr, [cr.mogrify(query, [model, id_]).decode() for id_ in ids])
+            parallel_execute(cr, [mogrify(cr, query, [model, id_]) for id_ in ids])
         elif ir.company_dependent_comodel == model:
-            json_path = cr.mogrify(
+            json_path = mogrify(
+                cr,
                 "$.* ? ({})".format(" || ".join(["@ == %s"] * len(ids))),
                 ids,
-            ).decode()
+            )
 
-            query = cr.mogrify(
+            query = mogrify(
+                cr,
                 format_query(
                     cr,
                     """
@@ -506,7 +512,7 @@ def remove_records(cr, model, ids):
                     json_path=sql.Literal(json_path),
                 ),
                 [ids],
-            ).decode()
+            )
             explode_execute(cr, query, table=ir.table)
     _rm_refs(cr, model, ids)
 
@@ -589,7 +595,7 @@ def _remove_import_export_paths(cr, model, field=None):
                 ON el.export_id = e.id
         """
     if field:
-        export_q = cr.mogrify(export_q + " WHERE el.name ~ %s ", [r"\y{}\y".format(field)]).decode()
+        export_q = mogrify(cr, export_q + " WHERE el.name ~ %s ", [r"\y{}\y".format(field)])
     else:
         export_q += " WHERE el.name IS NOT NULL"
 
@@ -602,7 +608,7 @@ def _remove_import_export_paths(cr, model, field=None):
               FROM base_import_mapping
             """
         if field:
-            import_q = cr.mogrify(import_q + " WHERE field_name ~ %s ", [r"\y{}\y".format(field)]).decode()
+            import_q = mogrify(cr, import_q + " WHERE field_name ~ %s ", [r"\y{}\y".format(field)])
         else:
             import_q += " WHERE field_name IS NOT NULL "
         impex_data.append((import_q, "base_import.mapping"))
@@ -776,7 +782,7 @@ def remove_group(cr, xml_id=None, group_id=None):
                 continue
 
             query = 'DELETE FROM "{}" WHERE "{}" = %s'.format(foreign_table, foreign_column)
-            query = cr.mogrify(query, (group_id,)).decode()
+            query = mogrify(cr, query, (group_id,))
 
             if column_exists(cr, foreign_table, "id"):
                 parallel_execute(cr, explode_query_range(cr, query, table=foreign_table))
@@ -882,7 +888,7 @@ def rename_xmlid(cr, old, new, noupdate=None, on_collision="fail"):
                         "arch_db",
                         PGRegexp(search_pattern),
                         replace_pattern,
-                        extra_filter=cr.mogrify("arch_db->>'en_US' ~ %s", [search_pattern]).decode(),
+                        extra_filter=mogrify(cr, "arch_db->>'en_US' ~ %s", [search_pattern]),
                     )
                 else:
                     arch_col = "arch_db" if column_exists(cr, "ir_ui_view", "arch_db") else "arch"
@@ -1421,7 +1427,7 @@ def delete_unused(cr, *xmlids, **kwargs):
 
     select_xids = " UNION ".join(
         [
-            cr.mogrify("SELECT %s::varchar as module, %s::varchar as name", [module, name]).decode()
+            mogrify(cr, "SELECT %s::varchar as module, %s::varchar as name", [module, name])
             for xmlid in xmlids
             for module, _, name in [xmlid.partition(".")]
         ]
@@ -1897,7 +1903,7 @@ def replace_record_references_batch(
             )
             cr.execute(query, locals())
         else:
-            fmt_query = cr.mogrify(format_query(cr, query, extra_join=SQLStr("")), locals()).decode()
+            fmt_query = mogrify(cr, format_query(cr, query, extra_join=SQLStr("")), locals())
             parallel_execute(cr, explode_query_range(cr, fmt_query, table=ir.table, alias="t"))
 
     # reference fields
@@ -1965,12 +1971,13 @@ def replace_in_all_jsonb_values(cr, table, column, old, new, extra_filter=None):
             r"\y" if re.match(r"\w", old[-1]) else "",
         )
     )
-    match = str(Json(re_old))[1:-1]  # escapes re_old into json string
+    match = json.dumps(re_old)  # escapes re_old into a JSON string
 
     if extra_filter is None:
         extra_filter = "true"
 
-    query = cr.mogrify(
+    query = mogrify(
+        cr,
         """
         WITH upd AS (
              SELECT t.id,
@@ -1988,7 +1995,7 @@ def replace_in_all_jsonb_values(cr, table, column, old, new, extra_filter=None):
          WHERE upd.id = t.id
         """.format(**locals()),
         [re_old, new],
-    ).decode()
+    )
 
     if "{parallel_filter}" in query:
         explode_execute(cr, query, table=table, alias="t")

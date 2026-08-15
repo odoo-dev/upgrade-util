@@ -32,8 +32,7 @@ except NameError:
 
 import psycopg2
 from psycopg2 import errorcodes, sql
-from psycopg2.extensions import quote_ident
-from psycopg2.extras import Json
+from psycopg2.extras import Json as _pg2_Json
 
 try:
     from odoo.modules import module as odoo_module
@@ -68,6 +67,125 @@ class SQLStr(str):
 
     See :func:`~odoo.upgrade.util.pg.format_query`
     """
+
+
+def _driver_is_psycopg3():
+    """Return whether the active Odoo driver is psycopg3 (module-level check)."""
+    try:
+        from odoo.sql_db import psycopg  # noqa: F401, PLC0415 - psycopg3 branch binds this name
+    except ImportError:
+        return False
+    else:
+        return True
+
+
+def _is_psycopg3(cr):
+    """Return whether the given cursor is backed by psycopg3."""
+    return hasattr(cr._cnx, "info")
+
+
+def _exc_pgcode(exc):
+    """Return the PostgreSQL error code (``SQLSTATE``) of an exception, whatever the driver.
+
+    psycopg2 exposes it as ``pgcode`` while psycopg3 uses ``sqlstate``.
+    """
+    return getattr(exc, "sqlstate", None) or getattr(exc, "pgcode", None)
+
+
+def _database_error(exc_type):
+    """Return the database error class matching ``exc_type`` for the active driver."""
+    if _driver_is_psycopg3():
+        import psycopg  # noqa: PLC0415 - only needed when the driver is psycopg3
+
+        return getattr(psycopg, exc_type.__name__, exc_type)
+    return exc_type
+
+
+def server_version(cr):
+    """Return the PostgreSQL server version as an int, whatever the driver."""
+    if _is_psycopg3(cr):
+        return cr._cnx.info.server_version
+    return cr._cnx.server_version
+
+
+def quote_ident(ident):
+    """Quote a SQL identifier (driver-agnostic)."""
+    return '"%s"' % str(ident).replace('"', '""')
+
+
+def _render_literal(value):
+    """Render a Python value as an SQL literal, without a psycopg2 connection."""
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    return "'%s'" % str(value).replace("'", "''")
+
+
+def _render_composable(composable):
+    """Render a psycopg2 ``sql`` composable to a plain SQL string.
+
+    psycopg3's ``mogrify()`` / ``execute()`` don't accept psycopg2 composables, so
+    queries are rendered to plain strings before being sent to the cursor.
+    """
+    if isinstance(composable, sql.Composed):
+        return "".join(_render_composable(part) for part in composable._wrapped)
+    if isinstance(composable, sql.SQL):
+        return composable._wrapped
+    if isinstance(composable, sql.Identifier):
+        return ".".join(quote_ident(part) for part in composable._wrapped)
+    if isinstance(composable, sql.Literal):
+        return _render_literal(composable._wrapped)
+    if isinstance(composable, sql.Placeholder):
+        return "%s" if composable._wrapped is None else "%%(%s)s" % composable._wrapped
+    if isinstance(composable, ColumnList):
+        return composable._render()
+    raise TypeError("Unsupported psycopg2.sql composable: %r" % (composable,))
+
+
+def mogrify(cr, query, params=None):
+    """Return the query with params substituted, as a ``str``.
+
+    psycopg2's ``mogrify()`` returns bytes while psycopg3's returns str. psycopg2
+    composables are rendered to plain SQL first as psycopg3 doesn't understand them.
+    """
+    if isinstance(query, sql.Composable):
+        query = _render_composable(query)
+    formatted = cr.mogrify(query, params)
+    return formatted.decode() if isinstance(formatted, bytes) else formatted
+
+
+def execute_values(cr, query, argslist, template=None, page_size=100, fetch=False):
+    """psycopg2/psycopg3 compatible ``execute_values``.
+
+    psycopg3's Odoo cursor implements ``execute_values()`` directly, while psycopg2
+    needs the ``psycopg2.extras`` helper on the raw driver cursor.
+    """
+    if hasattr(cr, "execute_values"):
+        return cr.execute_values(query, argslist, template=template, page_size=page_size, fetch=fetch)
+    from psycopg2.extras import execute_values as _pg2_execute_values  # noqa: PLC0415 - psycopg2 fallback
+
+    return _pg2_execute_values(cr._obj, query, argslist, template=template, page_size=page_size, fetch=fetch)
+
+
+def json_wrap(cr, value):
+    """Wrap a Python value for a ``json``/``jsonb`` column, whatever the driver."""
+    if _is_psycopg3(cr):
+        from psycopg.types.json import Json  # noqa: PLC0415 - driver dependent
+
+        return Json(value)
+    return _pg2_Json(value)
+
+
+def json_wrap_driverless(value):
+    """Wrap a Python value as JSON without a cursor (driver detected lazily)."""
+    if _driver_is_psycopg3():
+        from psycopg.types.json import Json  # noqa: PLC0415 - driver dependent
+
+        return Json(value)
+    return _pg2_Json(value)
 
 
 def get_max_workers():
@@ -135,8 +253,8 @@ if ThreadPoolExecutor is not None:
             ):
                 try:
                     tot_cnt += future.result() or 0
-                except psycopg2.OperationalError as exc:
-                    if exc.pgcode not in CONCURRENCY_ERRORCODES:
+                except _database_error(psycopg2.OperationalError) as exc:
+                    if _exc_pgcode(exc) not in CONCURRENCY_ERRORCODES:
                         raise
 
                     # to be retried without concurrency
@@ -219,7 +337,7 @@ def format_query(cr, query, *args, **kwargs):
 
     args = tuple(wrap(a) for a in args)
     kwargs = {k: wrap(v) for k, v in kwargs.items()}
-    return SQLStr(sql.SQL(query).format(*args, **kwargs).as_string(cr._obj))
+    return SQLStr(_render_composable(sql.SQL(query).format(*args, **kwargs)))
 
 
 class _ExplodeFormatter(string.Formatter):
@@ -296,7 +414,7 @@ def explode_query(cr, query, alias=None, num_buckets=8, prefix=None):
         raise ValueError("num_buckets should be greater than zero")
     parallel_filter = "mod(abs({prefix}id), %s) = %s".format(prefix=prefix)
     query = _explode_format(query.replace("%", "%%"), parallel_filter=parallel_filter)
-    return [cr.mogrify(query, [num_buckets, index]).decode() for index in range(num_buckets)]
+    return [mogrify(cr, query, [num_buckets, index]) for index in range(num_buckets)]
 
 
 def explode_query_range(cr, query, table, alias=None, bucket_size=DEFAULT_BUCKET_SIZE, prefix=None):
@@ -380,7 +498,7 @@ def explode_query_range(cr, query, table, alias=None, bucket_size=DEFAULT_BUCKET
     query = _explode_format(query.replace("%", "%%"), parallel_filter=parallel_filter)
 
     return [
-        cr.mogrify(query, {"lower-bound": ids[i], "upper-bound": ids[i + 1] - 1}).decode() for i in range(len(ids) - 1)
+        mogrify(cr, query, {"lower-bound": ids[i], "upper-bound": ids[i + 1] - 1}) for i in range(len(ids) - 1)
     ]
 
 
@@ -680,10 +798,8 @@ def create_column(cr, table, column, definition, **kwargs):
             on_delete_action = "NO ACTION"
         elif on_delete_action not in ON_DELETE_ACTIONS:
             raise ValueError("unexpected value for the `on_delete_action` argument: %r" % (on_delete_action,))
-        fk = (
-            sql.SQL("REFERENCES {}(id) ON DELETE {}")
-            .format(sql.Identifier(fk_table), sql.SQL(on_delete_action))
-            .as_string(cr._obj)
+        fk = _render_composable(
+            sql.SQL("REFERENCES {}(id) ON DELETE {}").format(sql.Identifier(fk_table), sql.SQL(on_delete_action))
         )
     elif on_delete_action is not no_def:
         raise ValueError("`on_delete_action` argument can only be used if `fk_table` argument is set.")
@@ -706,7 +822,7 @@ def create_column(cr, table, column, definition, **kwargs):
             create_fk(cr, table, column, fk_table, on_delete_action)
         if default is not no_def:
             query = 'UPDATE "{0}" SET "{1}" = %s WHERE "{1}" IS NULL'.format(table, column)
-            query = cr.mogrify(query, [default]).decode()
+            query = mogrify(cr, query, [default])
             parallel_execute(cr, explode_query_range(cr, query, table=table))
         return False
 
@@ -1013,7 +1129,7 @@ def get_index_on(cr, table, *columns, **kwargs):
         raise TypeError("get_index_on() got an unexpected keyword argument %r" % kwargs.popitem()[0])
     _validate_table(table)
 
-    if cr._cnx.server_version >= 90500:
+    if server_version(cr) >= 90500:
         position = "array_position(x.indkey, x.unnest_indkey)"
     else:
         # array_position does not exists prior postgresql 9.5
@@ -1202,7 +1318,7 @@ class ColumnList(UserList, sql.Composable):
 
         :param list(str) list_: list of unquoted column names
         """
-        quoted = [quote_ident(c, cr._obj) for c in list_]
+        quoted = [quote_ident(c) for c in list_]
         return cls(list_, quoted)
 
     def using(self, leading_comma=KEEP_CURRENT, trailing_comma=KEEP_CURRENT, alias=KEEP_CURRENT):
@@ -1228,8 +1344,8 @@ class ColumnList(UserList, sql.Composable):
         new._alias = self._alias if alias is KEEP_CURRENT else str(alias) if alias is not None else None
         return new
 
-    def as_string(self, context):
-        """:meta private: exclude from online docs."""
+    def _render(self):
+        """Render this column list as a plain SQL string (driver-agnostic)."""
         head = sql.SQL(", " if self._leading_comma and self else "")
         tail = sql.SQL("," if self._trailing_comma and self else "")
 
@@ -1242,7 +1358,11 @@ class ColumnList(UserList, sql.Composable):
             builder = lambda elem: sql.SQL(".").join(sql.Identifier(self._alias) + sql.Identifier(elem))
 
         body = sql.SQL(", ").join(builder(elem) for elem in self._unquoted_columns)
-        return sql.Composed([head, body, tail]).as_string(context)
+        return _render_composable(sql.Composed([head, body, tail]))
+
+    def as_string(self, context=None):
+        """:meta private: exclude from online docs."""
+        return self._render()
 
     def iter_unquoted(self):
         """
@@ -2043,7 +2163,7 @@ def bulk_update_table(cr, table, columns, mapping, key_col="id"):
         ),
         key_col=key_col,
     )
-    cr.execute(query, [Json(mapping)])
+    cr.execute(query, [json_wrap(cr, mapping)])
 
 
 class query_ids(object):
@@ -2083,8 +2203,8 @@ class query_ids(object):
                     "pk_{}_id".format(self._tmp_tbl),
                 )
             )
-        except psycopg2.IntegrityError as e:
-            if e.pgcode in [errorcodes.UNIQUE_VIOLATION, errorcodes.NOT_NULL_VIOLATION]:
+        except _database_error(psycopg2.IntegrityError) as e:
+            if _exc_pgcode(e) in [errorcodes.UNIQUE_VIOLATION, errorcodes.NOT_NULL_VIOLATION]:
                 raise ValueError("The query for ids is producing duplicate or NULL values:\n{}".format(query))
             raise
         self._ncr = named_cursor(cr, itersize)
@@ -2098,8 +2218,8 @@ class query_ids(object):
             self._ncr.close()
         try:
             self._cr.execute(format_query(self._cr, "DROP TABLE IF EXISTS {}", self._tmp_tbl))
-        except psycopg2.InternalError as e:
-            if e.pgcode != errorcodes.IN_FAILED_SQL_TRANSACTION:
+        except _database_error(psycopg2.InternalError) as e:
+            if _exc_pgcode(e) != errorcodes.IN_FAILED_SQL_TRANSACTION:
                 raise
 
     def __len__(self):

@@ -2,7 +2,7 @@
 import collections
 
 from .helpers import model_of_table, table_of_model
-from .pg import SQLStr, column_exists, table_exists
+from .pg import SQLStr, column_exists, mogrify, table_exists
 
 
 class IndirectReference(
@@ -162,9 +162,7 @@ def generate_indirect_reference_cleaning_queries(cr, ir):
             cond = "true"
 
         model_filter = ir.model_filter()
-        yield cr.mogrify(
-            "DELETE FROM {ir.table} t WHERE {model_filter} AND {cond}".format(**locals()), [model]
-        ).decode()
+        yield mogrify(cr, "DELETE FROM {ir.table} t WHERE {model_filter} AND {cond}".format(**locals()), [model])
 
 
 def res_model_res_id(cr, filtered=True):

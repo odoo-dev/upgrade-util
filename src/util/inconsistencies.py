@@ -3,13 +3,11 @@ import logging
 import os
 from textwrap import dedent
 
-from psycopg2.extensions import quote_ident
-from psycopg2.extras import Json
 from psycopg2.sql import SQL
 
 from .helpers import _validate_model, table_of_model
 from .misc import Sentinel, chunks, str2bool
-from .pg import format_query, get_value_or_en_translation, target_of
+from .pg import format_query, get_value_or_en_translation, json_wrap, quote_ident, target_of
 from .report import add_to_migration_reports, get_anchor_link_to_record, html_escape
 
 _logger = logging.getLogger(__name__)
@@ -228,7 +226,7 @@ def verify_uoms(
     _validate_model(model)
     table = table_of_model(cr, model)
 
-    q = lambda s: quote_ident(s, cr._cnx)
+    q = quote_ident
 
     if include_archived_products is FROM_ENV:
         include_archived_products = INCLUDE_ARCHIVED_PRODUCTS
@@ -294,7 +292,7 @@ def verify_uoms(
                 uom_column=q(uom_field),
             ),
             [
-                Json(line_new_ids),
+                json_wrap(cr, line_new_ids),
                 tuple(line_new_ids),
             ],
         )
@@ -404,7 +402,7 @@ def verify_products(
     table = table_of_model(cr, model)
     foreign_table = table_of_model(cr, foreign_model)
 
-    q = lambda s: quote_ident(s, cr._cnx)
+    q = quote_ident
 
     if include_archived_products is FROM_ENV:
         include_archived_products = INCLUDE_ARCHIVED_PRODUCTS

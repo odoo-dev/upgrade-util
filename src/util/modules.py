@@ -51,7 +51,7 @@ from .helpers import _validate_model, table_of_model
 from .misc import on_CI, parse_version, str2bool, version_gte
 from .models import delete_model
 from .orm import env, flush
-from .pg import SQLStr, column_exists, format_query, table_exists, target_of
+from .pg import SQLStr, column_exists, format_query, mogrify, table_exists, target_of
 from .records import (
     ref,
     remove_group,
@@ -729,7 +729,7 @@ def _force_install_module(cr, module, if_installed=None, reason="it has been exp
             # even if we skip auto installs, we still need to auto install the real link-modules.
             # those are in the "Hidden" category
             hidden = ref(cr, "base.module_category_hidden")
-            cat_match = cr.mogrify("AND on_me.category_id = %s", [hidden]).decode()
+            cat_match = mogrify(cr, "AND on_me.category_id = %s", [hidden])
 
         cr.execute(
             """
@@ -920,11 +920,11 @@ def _get_autoinstallable_modules(cr, module=None):
         # even if we skip auto installs, we still need to auto install the real link-modules.
         # those are in the "Hidden" category
         hidden = ref(cr, "base.module_category_hidden")
-        cat_match = cr.mogrify("m.category_id = %s", [hidden]).decode()
+        cat_match = mogrify(cr, "m.category_id = %s", [hidden])
 
     name_match = "true"
     if module:
-        name_match = cr.mogrify("m.name = %s", [module]).decode()
+        name_match = mogrify(cr, "m.name = %s", [module])
 
     query = format_query(
         cr,
