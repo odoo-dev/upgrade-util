@@ -1971,7 +1971,7 @@ def replace_in_all_jsonb_values(cr, table, column, old, new, extra_filter=None):
             r"\y" if re.match(r"\w", old[-1]) else "",
         )
     )
-    match = json.dumps(re_old)  # escapes re_old into a JSON string
+    match = json.dumps(re_old).replace("'", "''")  # escapes re_old into a JSON string, SQL-literal safe
 
     if extra_filter is None:
         extra_filter = "true"
