@@ -900,13 +900,17 @@ def create_fk(cr, table, column, fk_table, on_delete_action="NO ACTION"):
             # assume the `on_delete_action` is correct
             return
         cr.execute(
-            sql.SQL("ALTER TABLE {} DROP CONSTRAINT {}").format(
-                sql.Identifier(table), sql.Identifier(current_target[2])
+            _render_composable(
+                sql.SQL("ALTER TABLE {} DROP CONSTRAINT {}").format(
+                    sql.Identifier(table), sql.Identifier(current_target[2])
+                )
             )
         )
 
-    query = sql.SQL("ALTER TABLE {} ADD FOREIGN KEY ({}) REFERENCES {}(id) ON DELETE {}").format(
-        sql.Identifier(table), sql.Identifier(column), sql.Identifier(fk_table), sql.SQL(on_delete_action)
+    query = _render_composable(
+        sql.SQL("ALTER TABLE {} ADD FOREIGN KEY ({}) REFERENCES {}(id) ON DELETE {}").format(
+            sql.Identifier(table), sql.Identifier(column), sql.Identifier(fk_table), sql.SQL(on_delete_action)
+        )
     )
     cr.execute(query)
 
@@ -1504,12 +1508,16 @@ def rename_table(cr, old_table, new_table, remove_constraints=True):
             "Table {new_table} already exists. Can't rename table {old_table} to {new_table}.".format(**locals())
         )
 
-    cr.execute(sql.SQL("ALTER TABLE {} RENAME TO {}").format(sql.Identifier(old_table), sql.Identifier(new_table)))
+    cr.execute(
+        _render_composable(sql.SQL("ALTER TABLE {} RENAME TO {}").format(sql.Identifier(old_table), sql.Identifier(new_table)))
+    )
 
     # rename pkey sequence
     cr.execute(
-        sql.SQL("ALTER SEQUENCE IF EXISTS {} RENAME TO {}").format(
-            sql.Identifier(old_table + "_id_seq"), sql.Identifier(new_table + "_id_seq")
+        _render_composable(
+            sql.SQL("ALTER SEQUENCE IF EXISTS {} RENAME TO {}").format(
+                sql.Identifier(old_table + "_id_seq"), sql.Identifier(new_table + "_id_seq")
+            )
         )
     )
 
@@ -1541,7 +1549,9 @@ def rename_table(cr, old_table, new_table, remove_constraints=True):
     if cr.rowcount:
         (old_pkey,) = cr.fetchone()
         new_pkey = new_table + "_pkey"
-        cr.execute(sql.SQL("ALTER INDEX {} RENAME TO {}").format(sql.Identifier(old_pkey), sql.Identifier(new_pkey)))
+        cr.execute(
+            _render_composable(sql.SQL("ALTER INDEX {} RENAME TO {}").format(sql.Identifier(old_pkey), sql.Identifier(new_pkey)))
+        )
     else:
         new_pkey = ""  # no PK renamed
 
@@ -1558,9 +1568,11 @@ def rename_table(cr, old_table, new_table, remove_constraints=True):
     )
     for (idx,) in cr.fetchall():
         cr.execute(
-            sql.SQL("ALTER INDEX {} RENAME TO {}").format(
-                sql.Identifier(idx),
-                sql.Identifier(idx.replace(old_table, new_table)),
+            _render_composable(
+                sql.SQL("ALTER INDEX {} RENAME TO {}").format(
+                    sql.Identifier(idx),
+                    sql.Identifier(idx.replace(old_table, new_table)),
+                )
             )
         )
 
@@ -1606,8 +1618,10 @@ def rename_table(cr, old_table, new_table, remove_constraints=True):
         new_const = new_table + old_const[old_table_length:]
         _logger.info("Renaming constraint %r to %r", old_const, new_const)
         cr.execute(
-            sql.SQL("ALTER TABLE {} RENAME CONSTRAINT {} TO {}").format(
-                sql.Identifier(new_table), sql.Identifier(old_const), sql.Identifier(new_const)
+            _render_composable(
+                sql.SQL("ALTER TABLE {} RENAME CONSTRAINT {} TO {}").format(
+                    sql.Identifier(new_table), sql.Identifier(old_const), sql.Identifier(new_const)
+                )
             )
         )
 
@@ -2098,23 +2112,31 @@ def create_id_sequence(cr, table, set_as_default=True):
 
     if not sequence_exists(cr, sequence):
         cr.execute(
-            sql.SQL("CREATE SEQUENCE {sequence} OWNED BY {table}.id").format(
-                sequence=sequence_sql,
-                table=table_sql,
+            _render_composable(
+                sql.SQL("CREATE SEQUENCE {sequence} OWNED BY {table}.id").format(
+                    sequence=sequence_sql,
+                    table=table_sql,
+                )
             )
         )
 
     cr.execute(
-        sql.SQL("SELECT setval('{sequence}', (SELECT COALESCE(max(id), 0) FROM {table}) + 1, false)").format(
-            sequence=sequence_sql,
-            table=table_sql,
+        _render_composable(
+            sql.SQL("SELECT setval('{sequence}', (SELECT COALESCE(max(id), 0) FROM {table}) + 1, false)").format(
+                sequence=sequence_sql,
+                table=table_sql,
+            )
         )
     )
     if set_as_default:
         cr.execute(
-            sql.SQL("ALTER TABLE ONLY {table} ALTER COLUMN id SET DEFAULT nextval('{sequence}'::regclass)").format(
-                sequence=sequence_sql,
-                table=table_sql,
+            _render_composable(
+                sql.SQL(
+                    "ALTER TABLE ONLY {table} ALTER COLUMN id SET DEFAULT nextval('{sequence}'::regclass)"
+                ).format(
+                    sequence=sequence_sql,
+                    table=table_sql,
+                )
             )
         )
 
