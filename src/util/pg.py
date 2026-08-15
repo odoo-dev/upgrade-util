@@ -80,8 +80,13 @@ def _driver_is_psycopg3():
 
 
 def _is_psycopg3(cr):
-    """Return whether the given cursor is backed by psycopg3."""
-    return hasattr(cr._cnx, "info")
+    """Return whether the given cursor is backed by psycopg3.
+
+    psycopg2 connections also expose ``.info`` (``ConnectionInfo``), but only
+    psycopg3's ``ConnectionInfo`` has a ``.dsn`` attribute, so that's the
+    discriminator used here.
+    """
+    return hasattr(cr._cnx, "info") and hasattr(cr._cnx.info, "dsn")
 
 
 def _exc_pgcode(exc):
