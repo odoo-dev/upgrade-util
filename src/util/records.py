@@ -33,7 +33,7 @@ from .helpers import (
 from .inconsistencies import break_recursive_loops
 from .indirect_references import indirect_references
 from .inherit import direct_inherit_parents, for_each_inherit
-from .misc import AUTOMATIC, chunks, get_modules, version_between, version_gte
+from .misc import AUTOMATIC, chunks, get_modules, version_between, version_gte, NodeEditor
 from .orm import env, flush
 from .pg import (
     ColumnList,
@@ -298,7 +298,8 @@ def edit_view(cr, xmlid=None, view_id=None, skip_if_not_noupdate=True, active="a
 
                 translation_terms = {lang: get_trans_terms(value) for lang, value in arch.items()}
                 arch_etree = parse(arch["en_US"])
-                yield arch_etree
+                print("with new NodeEditor......")
+                yield NodeEditor(arch_etree)
                 new_arch = lxml.etree.tostring(arch_etree, encoding="unicode")
                 terms_en = translation_terms["en_US"]
                 arch_column_value = Json(
@@ -309,7 +310,8 @@ def edit_view(cr, xmlid=None, view_id=None, skip_if_not_noupdate=True, active="a
                 )
             else:
                 arch_etree = parse(arch)
-                yield arch_etree
+                print("with new NodeEditor......")
+                yield NodeEditor(arch_etree)
                 arch_column_value = lxml.etree.tostring(arch_etree, encoding="unicode")
 
             set_active = ", active={}".format(bool(active)) if active is not None else ""

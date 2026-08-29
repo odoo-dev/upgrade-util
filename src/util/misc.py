@@ -15,6 +15,7 @@ import textwrap
 import uuid
 from contextlib import contextmanager
 from itertools import chain, islice
+from lxml import etree
 
 try:
     from odoo import release
@@ -628,6 +629,86 @@ def make_pickleable_callback(callback):
             "Move it outside the `migrate()` function to make it top-level."
         ).format(callback.__name__, callback.__module__)
         raise MigrationError(error_msg)
+
+
+class NodeEditor:
+    """Null-safe fluent proxy for an lxml Element."""
+    def __init__(self, node=None):
+        self._node = node
+
+    @property
+    def element(self):
+        return self._node
+
+    def find(self, xpath):
+        if self._node is None:
+            return NodeEditor(None)
+        node = self._node.find(xpath)
+        if node is None:
+            return NodeEditor(None)
+        return NodeEditor(node)
+
+    def remove(self, node=None):
+        if self._node is None:
+            return NodeEditor(None)
+        target = self._node if node is None else node
+        if isinstance(target, NodeEditor):
+            target = target._node
+        if target is not None:
+            parent = target.getparent()
+            if parent is not None:
+                parent.remove(target)
+
+        return NodeEditor(None)
+
+    def __getattr__(self, name):
+        # Missing node:
+        # everything becomes a no-op NodeEditor.
+        if self._node is None:
+            return self
+        attr = getattr(self._node, name)
+        if not callable(attr):
+            return attr
+
+        def wrapper(*args, **kwargs):
+            result = attr(*args, **kwargs)
+
+            # lxml mutation methods return None.
+            if result is None:
+                return self
+            # Returned XML element.
+            if isinstance(result, etree._Element):
+                return NodeEditor(result)
+            return result
+        return wrapper
+
+    def __call__(self, *args, **kwargs):
+        # Allows:
+        # node.set(...)
+        # node.attrib.update(...)
+        # etc. when node is None.
+        if self._node is None:
+            return self
+        return self._node(*args, **kwargs)
+
+    def __getitem__(self, key):
+        if self._node is None:
+            return self
+        return self._node[key]
+
+    def __setitem__(self, key, value):
+        if self._node is not None:
+            self._node[key] = value
+
+    def __delitem__(self, key):
+        if self._node is not None:
+            del self._node[key]
+
+    def __bool__(self):
+        return self._node is not None
+
+    def __repr__(self):
+        return repr(self._node)
 
 
 class SelfPrint(object):
