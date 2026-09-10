@@ -163,6 +163,22 @@ def rename_custom_column(cr, table_name, col_name, new_col_name, custom_module=N
     )
 
 
+def get_cowed_view_ids(cr, key, extra_where="true"):
+    if isinstance(key, str):
+        key = [key]
+    cr.execute(
+        """
+        SELECT id
+        FROM ir_ui_view
+        WHERE key IN %s
+        AND website_id IS NOT NULL
+        AND ({})
+        """.format(extra_where),
+        [tuple(key)],
+    )
+    return {v_id for (v_id,) in cr.fetchall()}
+
+
 def reset_cowed_views(cr, xmlid, key=None):
     if "." not in xmlid:
         raise ValueError("Please use fully qualified name <module>.<name>")
