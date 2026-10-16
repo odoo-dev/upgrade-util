@@ -827,6 +827,20 @@ def custom_module_field_as_manual(env, rollback=True, do_flush=False):
         )
         setup_models(env.cr)
 
+    # Since saas~18.4, relational fields have a `bypass_search_access` attribute (formerly `auto_join`).
+    #     When it is False, odoo searches through the field go through the comodel's access checks,
+    #     e.g. `ir.attachment._search` fetches every matching record to check access. For fields pointing
+    #     to big tables (`ir.attachment`, `mail.message`, ...) this raises a MemoryError while validating views.
+    #     Standard fields set it in their Python definition, but manual fields can't: `ir_model_fields` has no
+    #     column for it, so they always get the default, False. Bypass it for the relational fields
+    #     converted to manual from custom modules. This only affects the in-memory registry,
+    #     which is rebuilt on rollback (step 7).
+    if ofields is not None and hasattr(ofields.Many2many, "bypass_search_access"):
+        for model in env.registry.models.values():
+            for field in model._fields.values():
+                if field.manual and field.type in ("many2one", "one2many", "many2many"):
+                    field.bypass_search_access = True
+
     # 5. Do the operation.
     yield
 
