@@ -1183,16 +1183,54 @@ def _refs(cr, *xmlids):
         """,
         pairs,
     )
-    return dict(cr.fetchall())
+    result = dict(cr.fetchall())
+
+    missing_pairs = list(map(list, zip(*(
+        xid.split(".", 1)
+        for xid, res_id in result.items()
+        if res_id is None and xid.startswith("account.")
+    ))))
+    if missing_pairs:
+        cr.execute(
+            """
+            WITH xmlids AS (
+                SELECT unnest(%s::text[]) AS module,
+                       unnest(%s::text[]) AS name
+            )
+            SELECT xmlids.module || '.' || xmlids.name,
+                   array_agg(imd.res_id ORDER BY imd.res_id)
+              FROM xmlids
+              JOIN ir_model_data imd
+                ON imd.module = xmlids.module
+               AND imd.name ~ ('^[0-9]+_' || xmlids.name || '$')
+             GROUP BY xmlids.module, xmlids.name
+            """,
+            missing_pairs,
+        )
+        for xid, res_ids in cr.fetchall():
+            result[xid] = tuple(res_ids)
+
+    return result
 
 
 def ref(cr, xmlid):
     """
     Return the id corresponding to the given :term:`xml_id <external identifier>`.
 
+    For models with company-specific IMD records (e.g. `account.tax`), the chart template
+    stores one IMD per company using the naming convention `{module}.{company_id}_{name}` 
+    (e.g.`account.1_account_tax_name`).  When the plain xmlid (without the
+    company-id prefix) has no direct match in `ir_model_data`, this function
+    falls back to collecting all company-specific variants and returns their
+    `res_id` values as a `tuple`.
+
+    In the normal case (exact IMD match) the function returns a single
+    `int` (or `None` when not found at all).
+
     :param str xml_id: record xml_id, under the format `module.name`
-    :return: ID of the referenced record, `None` if not found.
-    :rtype: int or None
+    :return: ID of the referenced record (`int`), a tuple of IDs for
+             company-specific records, or `None` if not found.
+    :rtype: int or tuple or None
     """
     return _refs(cr, xmlid)[xmlid]
 
