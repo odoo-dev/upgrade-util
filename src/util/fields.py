@@ -749,11 +749,34 @@ def invert_boolean_field(cr, model, old, new, skip_inherit=()):
     def _adapter(leaf, _or, _neg):
         return ["!", leaf]
 
+    cr.execute(
+        """
+        SELECT id
+          FROM ir_model_fields
+         WHERE model = %s
+           AND name = %s
+        """,
+        (model, old),
+    )
+    field_id = cr.fetchone()[0]
+
     if old == new:
         # same name but inverted value, just adapt domains
         adapt_domains(cr, model, old, new, adapter=_adapter, skip_inherit=skip_inherit, force_adapt=True)
     else:
         rename_field(cr, model, old, new, update_references=True, domain_adapter=_adapter, skip_inherit=skip_inherit)
+    if field_id and table_exists(cr, "mail_tracking_value"):
+        query = format_query(
+            cr,
+            """
+            UPDATE mail_tracking_value
+               SET old_value_integer = 1 - old_value_integer,
+                   new_value_integer = 1 - new_value_integer
+             WHERE field_id = {f}
+            """,
+            f=sql.Literal(field_id),
+        )
+        explode_execute(cr, query,table='mail_tracking_value')
 
     query = format_query(cr, "UPDATE {t} SET {c} = {c} IS NOT TRUE", t=table, c=new)
     explode_execute(cr, query, table=table)
